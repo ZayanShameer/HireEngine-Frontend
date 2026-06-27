@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
 import { 
   Search, SlidersHorizontal, Table, LayoutDashboard, User, Mail, 
-  Phone, Briefcase, Award, X, Trash2, ArrowRight, Shield 
+  Phone, Briefcase, Award, X, Trash2, Shield, FileUp, Users
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { Candidate, HiringStage, TargetDomain } from '../types';
+import { Candidate, HiringStage, TargetDomain, Requisition } from '../types';
 
 interface CandidateDirectoryProps {
   candidates: Candidate[];
+  requisitions: Requisition[];
   onUpdateCandidateStage: (id: number, stage: HiringStage) => void;
   onDeleteCandidate: (id: number) => void;
+  onNavigateToScreener: () => void;
 }
 
 const STAGES: HiringStage[] = ['Screening', 'Shortlist', 'Interviewing', 'Offered', 'Hired', 'Rejected'];
@@ -18,8 +20,10 @@ const SPECIALIZATIONS = ['13.8KV', '380KV', '765KV', 'HSE Certified', 'Deepwater
 
 export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
   candidates,
+  requisitions,
   onUpdateCandidateStage,
-  onDeleteCandidate
+  onDeleteCandidate,
+  onNavigateToScreener
 }) => {
   // Navigation & View Toggles
   const [viewMode, setViewMode] = useState<'list' | 'kanban'>('list');
@@ -133,6 +137,27 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
       case 'Rejected': return 'bg-rose-50 text-rose-700 border border-rose-200';
     }
   };
+
+  // Empty state
+  if (candidates.length === 0) {
+    return (
+      <div className="empty-state-container">
+        <div className="empty-state-icon">
+          <Users className="h-10 w-10" />
+        </div>
+        <h3 className="empty-state-title">No candidates yet</h3>
+        <p className="empty-state-desc">
+          Your talent directory will populate as you screen CVs or add candidates manually. Upload your first batch to get started.
+        </p>
+        <button
+          onClick={onNavigateToScreener}
+          className="btn btn-primary text-sm px-6 py-3 cursor-pointer"
+        >
+          <FileUp className="h-4 w-4" /> Go to CV Screener
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
