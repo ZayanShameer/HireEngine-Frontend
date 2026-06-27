@@ -318,7 +318,7 @@ function App() {
         
         {/* Workspace Header */}
         <header className="header select-none">
-          <h2 className="header-title flex items-center gap-2">
+          <h2 className="header-title flex items-center gap-4">
             {activeTab === 'dashboard' && 'Enterprise Dashboard'}
             {activeTab === 'screener' && 'Client-Side Batch CV Screener'}
             {activeTab === 'directory' && 'Faceted Talent Directory'}

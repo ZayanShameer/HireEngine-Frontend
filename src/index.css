@@ -55,9 +55,8 @@
 
 * {
   box-sizing: border-box;
-  margin: 0;
-  padding: 0;
 }
+
 
 body {
   font-family: var(--font-sans);
@@ -494,7 +493,7 @@ body {
 .screener-grid {
   display: grid;
   grid-template-columns: 320px 1fr;
-  gap: 24px;
+  gap: 36px;
 }
 
 @media (max-width: 900px) {
