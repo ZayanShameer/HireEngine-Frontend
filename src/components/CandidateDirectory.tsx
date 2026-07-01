@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { 
   Search, SlidersHorizontal, Table, LayoutDashboard, User, Mail, 
   Phone, Briefcase, Award, X, Trash2, Shield, FileUp, Users, Download,
@@ -54,6 +54,22 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
   const [magicResults, setMagicResults] = useState<(Candidate & { relevance_score?: number; matched_signals?: string[] })[]>([]);
   const [magicSignals, setMagicSignals] = useState<{ skills?: string[]; domains?: string[]; specs?: string[]; exp_years?: number | null } | null>(null);
   const magicDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Kanban board ref for horizontal wheel-scroll listener
+  const kanbanRef = useRef<HTMLDivElement>(null);
+
+  // Translate vertical mouse-wheel events into horizontal scroll on the kanban board
+  useEffect(() => {
+    const el = kanbanRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY === 0) return;
+      e.preventDefault();
+      el.scrollLeft += e.deltaY;
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [viewMode]);
 
   // Toggle Filters
   const handleDomainFilter = (domain: TargetDomain) => {
@@ -447,7 +463,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
         </div>
 
         {/* Right Main Panel: Directory Visualization */}
-        <div className="flex-1 overflow-y-auto min-h-0 pr-1">
+        <div className={viewMode === 'kanban' ? 'flex-1 min-h-0 overflow-hidden' : 'flex-1 overflow-y-auto min-h-0 pr-1'}>
           {viewMode === 'list' ? (
             /* LIST VIEW GRID */
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
@@ -547,7 +563,11 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
             </div>
           ) : (
             /* KANBAN BOARD VIEW */
-            <div className="flex gap-6 overflow-x-auto pb-6 h-full items-start">
+            <div
+              ref={kanbanRef}
+              className="flex gap-6 overflow-x-auto pb-6 h-full items-start cursor-ew-resize"
+              style={{ scrollbarWidth: 'thin', scrollbarColor: 'var(--border-light) transparent' }}
+            >
               {STAGES.map(stage => {
                 const stageCandidates = filteredCandidates.filter(c => c.current_stage === stage);
                 return (

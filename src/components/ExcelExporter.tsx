@@ -76,11 +76,8 @@ export const ExcelExporter: React.FC<ExcelExporterProps> = ({
       // 4. Download trigger
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      const requisitionName = activeRequisition ? activeRequisition.job_title.replace(/\s+/g, '_') : 'Master';
-      const dateStamp = new Date().toISOString().split('T')[0];
-      
       link.href = url;
-      link.setAttribute('download', `Hirengine_${requisitionName}_Talent_Sheet_${dateStamp}.csv`);
+      link.setAttribute('download', 'talent_master_sheet.xlsx');
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
