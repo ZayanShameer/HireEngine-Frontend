@@ -16,8 +16,18 @@ interface CandidateDirectoryProps {
 }
 
 const STAGES: HiringStage[] = ['Screening', 'Shortlist', 'Interviewing', 'Offered', 'Hired', 'Rejected'];
-const DOMAINS: TargetDomain[] = ['Oil & Gas', 'Railway', 'Information Technology', 'Healthcare', 'Electrical/Testing'];
-const SPECIALIZATIONS = ['13.8KV', '380KV', '765KV', 'HSE Certified', 'Deepwater Drilling', 'ETAP Certified', 'CBTC Systems', 'PLC/SCADA Developer'];
+const DOMAINS: TargetDomain[] = [
+  'Oil & Gas', 'Petrochemical', 'Construction & Infrastructure',
+  'Energy', 'Hospitality', 'Facilities Management', 'Maritime & Shipping',
+  'Power Plants', 'Engineering Services', 'Manufacturing', 'EPC'
+];
+const SPECIALIZATIONS = [
+  'NEBOSH', 'IOSH', 'OSHA 30', 'BOSIET', 'H2S Alive', 'API 510', 'CSWIP 3.1',
+  'PMP', 'Primavera P6', 'AutoCAD', 'Six Sigma', 'Lean Manufacturing', 'HAZOP',
+  'ETAP', 'SCADA', 'PLC', 'BIM', 'Revit', 'HACCP', 'Food Safety', 'ServSafe',
+  'IFMA CFM', 'LEED', 'HVAC Certification', 'STCW', 'DP Operator', 'MARPOL',
+  'Boiler Operator', 'DCS', 'SolidWorks', 'ANSYS', 'ISO 9001', 'CQE'
+];
 
 export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
   candidates,
@@ -70,7 +80,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
     setMagicSignals(null);
   };
 
-  // Magic Search — debounced call to backend
+  // Magic Search â€” debounced call to backend
   const runMagicSearch = useCallback((query: string) => {
     if (magicDebounce.current) clearTimeout(magicDebounce.current);
     if (!query.trim()) {
@@ -112,7 +122,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
     if (mode === 'magic') { setSearchQuery(''); }
   };
 
-  // Filtering Logic — uses magic-ranked list when in magic mode
+  // Filtering Logic â€” uses magic-ranked list when in magic mode
   const baseList = searchMode === 'magic' && magicResults.length > 0
     ? magicResults
     : searchMode === 'magic' && magicQuery.trim() && !magicLoading
@@ -131,11 +141,17 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
     // 2. Domain Match
     const matchDomain = selectedDomains.length === 0 || selectedDomains.some(d => {
       const remarks = candidate.industry_remarks.toLowerCase();
-      if (d === 'Oil & Gas' && (remarks.includes('oil') || remarks.includes('gas') || remarks.includes('petroleum'))) return true;
-      if (d === 'Railway' && (remarks.includes('rail') || remarks.includes('locomotive') || remarks.includes('metro'))) return true;
-      if (d === 'Electrical/Testing' && (remarks.includes('electrical') || remarks.includes('voltage') || remarks.includes('relay') || remarks.includes('switchgear'))) return true;
-      if (d === 'Information Technology' && (remarks.includes('react') || remarks.includes('frontend') || remarks.includes('software') || remarks.includes('it '))) return true;
-      if (d === 'Healthcare' && (remarks.includes('clinical') || remarks.includes('medical') || remarks.includes('healthcare'))) return true;
+      if (d === 'Oil & Gas' && (remarks.includes('petroleum') || remarks.includes('drilling') || remarks.includes('offshore') || remarks.includes('pipeline') || remarks.includes('wellhead') || remarks.includes('hydrocarbon') || remarks.includes('oil') || remarks.includes('gas'))) return true;
+      if (d === 'Petrochemical' && (remarks.includes('petrochemical') || remarks.includes('chemical plant') || remarks.includes('distillation') || remarks.includes('cracking') || remarks.includes('feedstock'))) return true;
+      if (d === 'Construction & Infrastructure' && (remarks.includes('civil') || remarks.includes('structural') || remarks.includes('mep') || remarks.includes('construction') || remarks.includes('quantity surveyor') || remarks.includes('site engineer'))) return true;
+      if (d === 'Energy' && (remarks.includes('renewable') || remarks.includes('solar') || remarks.includes('wind') || remarks.includes('grid') || remarks.includes('power systems') || remarks.includes('energy'))) return true;
+      if (d === 'Hospitality' && (remarks.includes('hotel') || remarks.includes('resort') || remarks.includes('barista') || remarks.includes('f&b') || remarks.includes('housekeeping') || remarks.includes('restaurant'))) return true;
+      if (d === 'Facilities Management' && (remarks.includes('facilities') || remarks.includes('hvac') || remarks.includes('building maintenance') || remarks.includes('property management') || remarks.includes('fm'))) return true;
+      if (d === 'Maritime & Shipping' && (remarks.includes('maritime') || remarks.includes('shipping') || remarks.includes('vessel') || remarks.includes('marine') || remarks.includes('port') || remarks.includes('seafarer'))) return true;
+      if (d === 'Power Plants' && (remarks.includes('power plant') || remarks.includes('turbine') || remarks.includes('boiler') || remarks.includes('generator') || remarks.includes('dcs') || remarks.includes('commissioning'))) return true;
+      if (d === 'Engineering Services' && (remarks.includes('design engineer') || remarks.includes('application engineer') || remarks.includes('sales engineer') || remarks.includes('mechatronics') || remarks.includes('engineering services'))) return true;
+      if (d === 'Manufacturing' && (remarks.includes('manufacturing') || remarks.includes('production') || remarks.includes('quality engineer') || remarks.includes('six sigma') || remarks.includes('lean'))) return true;
+      if (d === 'EPC' && (remarks.includes('epc') || remarks.includes('procurement') || remarks.includes('construction engineer') || remarks.includes('engineering procurement'))) return true;
       return false;
     });
 
@@ -319,7 +335,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                     type="text"
                     value={magicQuery}
                     onChange={e => handleMagicQueryChange(e.target.value)}
-                    placeholder="Describe your ideal candidate…"
+                    placeholder="Describe your ideal candidateâ€¦"
                     className="w-full bg-[var(--primary)]/5 border border-[var(--primary)]/30 rounded-[var(--radius-md)] pr-4 py-3 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--primary)] placeholder:text-[var(--primary)]/50"
                     style={{ paddingLeft: '44px' }}
                   />
@@ -343,7 +359,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                 )}
                 {magicQuery.trim() && !magicLoading && (
                   <p className="text-[11px] text-[var(--text-muted)] px-1">
-                    {magicResults.length > 0 ? `${magicResults.length} candidates ranked by relevance` : 'No matches found — try different keywords'}
+                    {magicResults.length > 0 ? `${magicResults.length} candidates ranked by relevance` : 'No matches found â€” try different keywords'}
                   </p>
                 )}
               </div>
@@ -498,7 +514,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                     <div className="candidate-card-footer">
                       <div className="flex items-center gap-2">
                         <span className="text-[var(--text-muted)]">Added {new Date(candidate.created_at).toLocaleDateString()}</span>
-                        <span className="text-slate-700 font-bold">•</span>
+                        <span className="text-slate-700 font-bold">â€¢</span>
                         <span className={`status-pill text-[10px] px-2 py-0.5 rounded-full font-bold tracking-wider ${getStageColorClass(candidate.current_stage)}`}>
                           {candidate.current_stage}
                         </span>
@@ -687,7 +703,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                 </div>
               </div>
 
-              {/* Download CV — only shown when a file was uploaded to backend */}
+              {/* Download CV â€” only shown when a file was uploaded to backend */}
               {selectedCandidate.cv_file_name && (
                 <div className="flex flex-col gap-3">
                   <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
@@ -790,3 +806,4 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
     </div>
   );
 };
+

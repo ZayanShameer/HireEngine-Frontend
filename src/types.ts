@@ -2,10 +2,16 @@
 
 export type TargetDomain = 
   | 'Oil & Gas' 
-  | 'Railway' 
-  | 'Information Technology' 
-  | 'Healthcare' 
-  | 'Electrical/Testing';
+  | 'Petrochemical' 
+  | 'Construction & Infrastructure' 
+  | 'Energy'
+  | 'Hospitality'
+  | 'Facilities Management'
+  | 'Maritime & Shipping' 
+  | 'Power Plants' 
+  | 'Engineering Services'
+  | 'Manufacturing'
+  | 'EPC';
 
 export type HiringStage = 
   | 'Screening' 

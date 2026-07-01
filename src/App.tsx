@@ -4,43 +4,43 @@ import {
   MapPin, Database, Layers, CheckCircle2, ArrowRight, Trash2,
   AlertTriangle, TrendingUp, Clock, Target
 } from 'lucide-react';
-import { Requisition, Candidate, HiringStage } from './types';
+import { Requisition, Candidate, HiringStage, TargetDomain } from './types';
 import { BulkUploadQueue } from './components/BulkUploadQueue';
 import { CandidateDirectory } from './components/CandidateDirectory';
 import { ExcelExporter } from './components/ExcelExporter';
 
-// Seed Requisitions — shown on first launch; user can delete them
+// Seed Requisitions â€” shown on first launch; user can delete them
 const SEED_REQUISITIONS: Requisition[] = [
   {
     id: 101,
     job_title: 'Petroleum Pipeline Engineer',
-    location: 'Dubai, UAE',
+    location: 'Riyadh, Saudi Arabia',
     target_domain: 'Oil & Gas',
-    job_description_text: 'Looking for a Senior Pipeline Engineer. Must have experience in petroleum pipelines, drilling simulation, gas reservoirs, refining operations, offshore wellhead setups, and hydrocarbon transport. Requires HSE certifications.',
+    job_description_text: 'Looking for a Senior Pipeline Engineer with experience in petroleum pipelines, drilling simulation, gas reservoirs, refining operations, offshore wellhead setups, and hydrocarbon transport. HSE certifications required.',
     created_at: new Date(Date.now() - 86400000 * 5).toISOString()
   },
   {
     id: 102,
-    job_title: 'Infrastructure & Rolling Stock Lead',
-    location: 'Chicago, US',
-    target_domain: 'Railway',
-    job_description_text: 'Requires lead rail engineer for track layout, signaling systems, rolling stock maintenance, CBTC (Communication Based Train Control), bogie designs, and transit safety compliance. Railway industry experience is strictly mandatory.',
+    job_title: 'Process Engineer â€” Petrochemical Plant',
+    location: 'Jubail, Saudi Arabia',
+    target_domain: 'Petrochemical',
+    job_description_text: 'Seeking a process engineer with expertise in distillation operations, catalyst management, feedstock handling, chemical process optimization, and plant safety. HAZOP experience is a strong advantage.',
     created_at: new Date(Date.now() - 86400000 * 4).toISOString()
   },
   {
     id: 103,
-    job_title: 'High-Voltage Switchgear Operator',
-    location: 'Berlin, Germany',
-    target_domain: 'Electrical/Testing',
-    job_description_text: 'Seeking switchgear technicians with expertise in high voltage relay testing, substation GIS maintenance, SCADA control systems, transformers calibration, and CT/VT ratio inspections. Safety certified.',
+    job_title: 'MEP Site Engineer',
+    location: 'Dubai, UAE',
+    target_domain: 'Construction & Infrastructure',
+    job_description_text: 'Hiring an MEP site engineer for large-scale infrastructure projects. Must have experience in mechanical, electrical, and plumbing systems, site management, AutoCAD, and Primavera P6 scheduling.',
     created_at: new Date(Date.now() - 86400000 * 3).toISOString()
   },
   {
     id: 104,
-    job_title: 'Senior Frontend Developer',
-    location: 'London, UK',
-    target_domain: 'Information Technology',
-    job_description_text: 'We are hiring a React developer with TypeScript, HTML/CSS layout capabilities, Redux state handling, and Git control skills. Docker and AWS deployment is a plus.',
+    job_title: 'Marine Engineer â€” Vessel Operations',
+    location: 'Abu Dhabi, UAE',
+    target_domain: 'Maritime & Shipping',
+    job_description_text: 'Recruiting a qualified marine engineer for vessel operations and maintenance. STCW certification required. Experience in cargo handling, port logistics, and maritime safety compliance is essential.',
     created_at: new Date(Date.now() - 86400000 * 2).toISOString()
   }
 ];
@@ -79,7 +79,7 @@ function App() {
   const [candidates, setCandidates] = useLocalStorage<Candidate[]>('hireengine_candidates', []);
   const [activeReqId, setActiveReqId] = useLocalStorage<number>('hireengine_active_req', 101);
 
-  // Persisted upload queue — in-flight items are reset to 'failed' on reload
+  // Persisted upload queue â€” in-flight items are reset to 'failed' on reload
   const [queue, setQueue] = useLocalStorage<import('./types').QueueItem[]>('hireengine_queue', []);
   // Reset any stuck in-progress items from a previous session
   const queueInitialized = React.useRef(false);
@@ -121,7 +121,7 @@ function App() {
   // Requisition form state
   const [newTitle, setNewTitle] = useState('');
   const [newLocation, setNewLocation] = useState('');
-  const [newDomain, setNewDomain] = useState<'Oil & Gas' | 'Railway' | 'Information Technology' | 'Healthcare' | 'Electrical/Testing'>('Oil & Gas');
+  const [newDomain, setNewDomain] = useState<TargetDomain>('Oil & Gas');
   const [newDesc, setNewDesc] = useState('');
 
   const handleCreateRequisition = (e: React.FormEvent) => {
@@ -177,8 +177,8 @@ function App() {
     addToast('All candidate records cleared from the system.', 'warning');
   };
 
-  // Dashboard calculations — real data
-  // Dashboard calculations — scoped to the active requisition
+  // Dashboard calculations â€” real data
+  // Dashboard calculations â€” scoped to the active requisition
   const activeCandidates = candidates.filter(c => c.requisition_id === activeReqId);
   const totalCVs = activeCandidates.length;
   const avgScore = totalCVs > 0 ? Math.round(activeCandidates.reduce((sum, c) => sum + c.match_score, 0) / totalCVs) : 0;
@@ -248,7 +248,7 @@ function App() {
       <aside className="sidebar">
         <div className="logo-container">
           <div className="logo select-none">
-            <span className="logo-icon">⚡</span>
+            <span className="logo-icon">âš¡</span>
             Hirengine AI
           </div>
         </div>
@@ -371,7 +371,7 @@ function App() {
         {/* Content Area */}
         <div className="content-body">
 
-          {/* ── TAB 1: DASHBOARD ── */}
+          {/* â”€â”€ TAB 1: DASHBOARD â”€â”€ */}
           {activeTab === 'dashboard' && (
             <div className="animate-fade-in">
 
@@ -416,7 +416,7 @@ function App() {
                       <div className="stat-value">{avgScore}%</div>
                       <div className="stat-footer">
                         <span className="font-bold" style={{ color: avgScore >= 75 ? 'var(--success)' : 'var(--warning)' }}>
-                          {avgScore >= 75 ? '✓ Above threshold' : '↓ Below 75% target'}
+                          {avgScore >= 75 ? 'âœ“ Above threshold' : 'â†“ Below 75% target'}
                         </span>
                       </div>
                     </div>
@@ -532,9 +532,9 @@ function App() {
                       <h3 className="card-title mb-4">Match Score Distribution</h3>
                       <div className="flex flex-col gap-3">
                         {[
-                          { label: 'High Match (80–100)', count: activeCandidates.filter(c => c.match_score >= 80).length, color: 'bg-emerald-500' },
-                          { label: 'Mid Match (50–79)', count: activeCandidates.filter(c => c.match_score >= 50 && c.match_score < 80).length, color: 'bg-amber-500' },
-                          { label: 'Low Match (0–49)', count: activeCandidates.filter(c => c.match_score < 50).length, color: 'bg-rose-400' },
+                          { label: 'High Match (80â€“100)', count: activeCandidates.filter(c => c.match_score >= 80).length, color: 'bg-emerald-500' },
+                          { label: 'Mid Match (50â€“79)', count: activeCandidates.filter(c => c.match_score >= 50 && c.match_score < 80).length, color: 'bg-amber-500' },
+                          { label: 'Low Match (0â€“49)', count: activeCandidates.filter(c => c.match_score < 50).length, color: 'bg-rose-400' },
                         ].map(({ label, count, color }) => {
                           const pct = totalCVs > 0 ? Math.round((count / totalCVs) * 100) : 0;
                           return (
@@ -560,7 +560,7 @@ function App() {
                             activeCandidates.forEach(c => c.skills_matrix.forEach(s => { skillMap[s] = (skillMap[s] || 0) + 1; }));
                             return Object.entries(skillMap).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([skill, count]) => (
                               <span key={skill} className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-[var(--primary-glow)] text-[var(--primary)] border border-[var(--primary)]/20">
-                                {skill} <span className="opacity-60">×{count}</span>
+                                {skill} <span className="opacity-60">Ã—{count}</span>
                               </span>
                             ));
                           })()}
@@ -573,7 +573,7 @@ function App() {
             </div>
           )}
 
-          {/* ── TAB 2: SCREENER ── */}
+          {/* â”€â”€ TAB 2: SCREENER â”€â”€ */}
           {activeTab === 'screener' && (
             <div className="screener-grid animate-fade-in">
               {/* Left: Job Spec Panel */}
@@ -639,7 +639,7 @@ function App() {
             </div>
           )}
 
-          {/* ── TAB 3: DIRECTORY ── */}
+          {/* â”€â”€ TAB 3: DIRECTORY â”€â”€ */}
           {activeTab === 'directory' && (
             <div className="h-full overflow-hidden">
               <CandidateDirectory 
@@ -652,7 +652,7 @@ function App() {
             </div>
           )}
 
-          {/* ── TAB 4: REQUISITIONS ── */}
+          {/* â”€â”€ TAB 4: REQUISITIONS â”€â”€ */}
           {activeTab === 'requisitions' && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8 animate-fade-in">
               {/* Create Form */}
@@ -681,10 +681,16 @@ function App() {
                     <label className="form-label">Industry Domain</label>
                     <select value={newDomain} onChange={e => setNewDomain(e.target.value as any)} className="form-select text-sm">
                       <option value="Oil & Gas">Oil & Gas</option>
-                      <option value="Railway">Railway</option>
-                      <option value="Electrical/Testing">Electrical/Testing</option>
-                      <option value="Information Technology">Information Technology</option>
-                      <option value="Healthcare">Healthcare</option>
+                      <option value="Petrochemical">Petrochemical</option>
+                      <option value="Construction & Infrastructure">Construction & Infrastructure</option>
+                      <option value="Energy">Energy</option>
+                      <option value="Hospitality">Hospitality</option>
+                      <option value="Facilities Management">Facilities Management</option>
+                      <option value="Maritime & Shipping">Maritime & Shipping</option>
+                      <option value="Power Plants">Power Plants</option>
+                      <option value="Engineering Services">Engineering Services</option>
+                      <option value="Manufacturing">Manufacturing</option>
+                      <option value="EPC">EPC</option>
                     </select>
                   </div>
                   <div>
@@ -732,7 +738,7 @@ function App() {
                             </div>
                             <div className="flex items-center gap-4 text-xs text-[var(--text-secondary)]">
                               <span className="flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-[var(--primary)]" /> {req.location}</span>
-                              <span className="text-slate-400">•</span>
+                              <span className="text-slate-400">â€¢</span>
                               <span>Added {new Date(req.created_at).toLocaleDateString()}</span>
                             </div>
                             <p className="text-sm text-[var(--text-secondary)] leading-relaxed max-w-[520px] mt-0.5 line-clamp-2">
@@ -756,7 +762,7 @@ function App() {
                                   : 'bg-black/5 text-[var(--text-primary)] border border-black/10 hover:border-black/20 hover:bg-black/10'
                               }`}
                             >
-                              {activeReqId === req.id ? '✓ Active' : 'Set Active'}
+                              {activeReqId === req.id ? 'âœ“ Active' : 'Set Active'}
                             </button>
                             <button
                               onClick={() => {
@@ -804,3 +810,5 @@ function App() {
 }
 
 export default App;
+
+

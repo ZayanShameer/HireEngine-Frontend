@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_from_directory
+﻿from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import re
 import os
@@ -31,43 +31,121 @@ UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 SUPPORTED_EXTENSIONS = {'.pdf', '.docx', '.doc', '.txt'}
 
-# 1. Domain Taxonomy Dictionary Specifications
+# 1. Domain Taxonomy — 7 Business Verticals
 DOMAIN_TAXONOMY = {
     'Oil & Gas': [
-        'petroleum', 'drilling', 'refinery', 'offshore', 'pipeline', 'hydrocarbon',
-        'gas reservoir', 'petrochemical', 'exploration', 'wellhead', 'downstream', 'upstream'
+        'mechanical engineering', 'chemical engineering', 'petroleum engineering',
+        'instrumentation engineering', 'electrical engineering', 'civil engineering',
+        'process engineering', 'industrial engineering', 'production engineering',
+        'diploma mechanical', 'diploma electrical', 'diploma instrumentation',
+        'diploma civil', 'process technology', 'commissioning engineer',
+        'qa/qc engineer', 'pipeline engineer', 'welding inspector',
+        'ndt inspector', 'safety officer', 'hse engineer', 'instrument engineer',
+        'rotating equipment engineer', 'static equipment engineer',
+        'maintenance engineer', 'shutdown engineer', 'oil', 'gas', 'petroleum'
     ],
-    'Railway': [
-        'locomotive', 'rolling stock', 'signaling', 'track', 'rail', 'transit', 'metro',
-        'cbtc', 'derailment', 'bogie', 'subway', 'carriage'
+    'Petrochemical': [
+        'chemical engineering', 'mechanical engineering', 'instrumentation',
+        'electrical', 'polymer engineering', 'process engineer', 'production engineer',
+        'plant engineer', 'maintenance engineer', 'operations engineer',
+        'process safety engineer', 'petrochemical', 'chemical plant',
+        'distillation', 'cracking', 'feedstock'
     ],
-    'Electrical/Testing': [
-        'transformer', 'relay', 'switchgear', 'gis', 'voltage', 'scada', 'ct', 'vt',
-        'substation', 'high voltage', 'etap', 'relays'
+    'Construction & Infrastructure': [
+        'civil engineering', 'structural engineering', 'architecture',
+        'mechanical', 'electrical', 'quantity surveying', 'rics', 'site engineer',
+        'planning engineer', 'quantity surveyor', 'project engineer', 'project manager',
+        'qa/qc engineer', 'construction manager', 'civil', 'mep', 'construction',
+        'structural'
     ],
-    'Information Technology': [
-        'react', 'typescript', 'javascript', 'python', 'flask', 'software', 'database',
-        'sql', 'git', 'docker', 'aws', 'django', 'node', 'frontend', 'backend'
+    'Energy': [
+        'electrical engineering', 'mechanical engineering', 'renewable energy engineering',
+        'power systems', 'electronics engineering', 'iec standards', 'solar pv design',
+        'wind turbine maintenance', 'electrical engineer', 'grid engineer',
+        'power systems engineer', 'protection engineer', 'solar engineer', 'wind engineer',
+        'renewable', 'solar', 'wind', 'grid', 'energy'
     ],
-    'Healthcare': [
-        'clinical', 'nursing', 'medical', 'hospital', 'patient', 'health', 'surgeon',
-        'healthcare', 'diagnosis', 'clinic', 'pediatric'
+    'Hospitality': [
+        'hotel management', 'hospitality management', 'culinary arts', 'tourism',
+        'business administration', 'ahlei', 'wset', 'barista certification',
+        'hotel manager', 'front office manager', 'executive chef', 'sous chef',
+        'housekeeping manager', 'restaurant manager', 'guest relations', 'hotel',
+        'resort', 'barista', 'f&b', 'housekeeping', 'restaurant'
+    ],
+    'Facilities Management': [
+        'mechanical engineering', 'electrical engineering', 'hvac', 'facility management',
+        'civil engineering', 'ifma cfm', 'fmp', 'leed', 'bms', 'hvac certification',
+        'facility manager', 'maintenance manager', 'hvac engineer', 'mep engineer',
+        'building engineer', 'facilities', 'building maintenance', 'property management',
+        'fm'
+    ],
+    'Maritime & Shipping': [
+        'marine engineering', 'naval architecture', 'nautical science',
+        'mechanical engineering', 'stcw', 'coc class i-iv', 'gmdss', 'dp operator',
+        'ism', 'isps', 'marpol', 'tanker endorsement', 'marine engineer',
+        'chief engineer', 'second engineer', 'deck officer', 'captain', 'port engineer',
+        'technical superintendent', 'maritime', 'shipping', 'vessel', 'marine', 'port',
+        'seafarer'
+    ],
+    'Power Plants': [
+        'mechanical', 'electrical', 'instrumentation', 'chemical', 'power engineering',
+        'boiler operator', 'turbine maintenance', 'shift engineer', 'operations engineer',
+        'turbine engineer', 'boiler engineer', 'maintenance engineer', 'plant manager',
+        'power plant', 'turbine', 'boiler', 'generator', 'dcs', 'commissioning'
+    ],
+    'Engineering Services': [
+        'any engineering discipline', 'industrial engineering', 'mechatronics',
+        'electronics', 'design engineer', 'project engineer', 'application engineer',
+        'sales engineer', 'service engineer'
+    ],
+    'Manufacturing': [
+        'mechanical', 'industrial', 'production', 'mechatronics', 'manufacturing engineering',
+        'tpm', 'kaizen', 'cqe', 'cqa', 'production engineer', 'manufacturing engineer',
+        'process engineer', 'quality engineer', 'plant manager', 'manufacturing',
+        'six sigma', 'lean'
+    ],
+    'EPC': [
+        'mechanical', 'civil', 'electrical', 'instrumentation', 'chemical',
+        'epc engineer', 'project engineer', 'procurement engineer', 'construction engineer',
+        'planning engineer', 'commissioning engineer', 'qa/qc engineer', 'epc',
+        'procurement', 'engineering procurement'
     ]
 }
 
-# Supported Voltage Specialization Tags
+# Specialization Tags
 SPECIALIZATION_POOL = [
-    '13.8KV', '380KV', '765KV', 'HSE Certified', 'Deepwater Drilling', 
-    'ETAP Certified', 'CBTC Systems', 'PLC/SCADA Developer'
+    'NEBOSH', 'IOSH', 'OSHA 10', 'OSHA 30', 'H2S Alive', 'BOSIET', 'HUET', 'OPITO',
+    'CSWIP 3.1', 'CSWIP 3.2', 'AWS CWI', 'API 510', 'API 570', 'API 653',
+    'ASNT Level II', 'NACE CIP', 'BGAS', 'PMP', 'Primavera P6', 'AutoCAD', 'PDMS',
+    'SP3D', 'SmartPlant', 'ISO 9001 Lead Auditor', 'ISO 45001 Lead Auditor',
+    'Six Sigma', 'Lean Manufacturing', 'HAZOP', 'SIL', 'Functional Safety',
+    'STAAD Pro', 'ETABS', 'Revit', 'BIM', 'OSHA', 'Quantity Surveying', 'RICS',
+    'ISO 9001', 'ETAP', 'SCADA', 'PLC', 'AutoCAD Electrical', 'IEC Standards',
+    'Solar PV Design', 'Wind Turbine Maintenance', 'HACCP', 'Food Safety', 'ServSafe',
+    'AHLEI', 'WSET', 'Barista Certification', 'IFMA CFM', 'FMP', 'LEED', 'BMS',
+    'HVAC Certification', 'STCW', 'COC Class I-IV', 'GMDSS', 'DP Operator', 'ISM',
+    'ISPS', 'MARPOL', 'Tanker Endorsement', 'Boiler Operator', 'Turbine Maintenance',
+    'DCS', 'SolidWorks', 'CATIA', 'ANSYS', 'MATLAB', 'Six Sigma Green Belt',
+    'Six Sigma Black Belt', 'TPM', 'Kaizen', 'CQE', 'CQA', 'AWS'
 ]
 
-# Supported skills pool for skills matrix extraction
+# Skills pool for CV extraction
 SKILLS_POOL = [
-    'REACT', 'TYPESCRIPT', 'JAVASCRIPT', 'PYTHON', 'SQL', 'GIT', 'DOCKER', 'AWS',
-    'PETROLEUM PIPING', 'DRILLING SIMULATION', 'HSE RISK MANAGEMENT', 'ETAP SAFETY',
-    'ROLLING STOCK MAINTENANCE', 'SIGNALING SYSTEMS', 'HIGH VOLTAGE RELAY', 'GIS MAINTENANCE',
-    'SWITCHGEAR TESTING', 'SCADA CONTROL', 'NURSING CARE', 'CLINICAL TRIALS', 'FIGMA',
-    'AUTOCAD', 'SOLIDWORKS', 'PROJECT MANAGEMENT', 'WELL LOGGING', 'SEISMIC ANALYSIS'
+    'PETROLEUM PIPING', 'DRILLING SIMULATION', 'HSE RISK MANAGEMENT',
+    'WELL LOGGING', 'SEISMIC ANALYSIS', 'WELLHEAD OPERATIONS', 'PIPELINE INTEGRITY',
+    'PROCESS ENGINEERING', 'CHEMICAL ANALYSIS', 'DISTILLATION OPERATIONS',
+    'PLANT OPERATIONS', 'CATALYST MANAGEMENT', 'PROCESS SAFETY',
+    'CIVIL ENGINEERING', 'MEP SYSTEMS', 'QUANTITY SURVEYING',
+    'STRUCTURAL DESIGN', 'AUTOCAD', 'SITE MANAGEMENT', 'PRIMAVERA P6',
+    'HVAC SYSTEMS', 'FACILITIES MANAGEMENT', 'BUILDING MAINTENANCE',
+    'ENERGY AUDITING', 'PROPERTY MANAGEMENT', 'PREVENTIVE MAINTENANCE',
+    'SHIP OPERATIONS', 'MARINE ENGINEERING', 'PORT LOGISTICS',
+    'CARGO HANDLING', 'VESSEL MAINTENANCE', 'MARITIME SAFETY',
+    'POWER GENERATION', 'TURBINE MAINTENANCE', 'DCS CONTROL',
+    'INSTRUMENTATION', 'BOILER OPERATIONS', 'ELECTRICAL SYSTEMS',
+    'CUSTOMER SERVICE', 'F&B OPERATIONS', 'BARISTA SKILLS',
+    'HOTEL MANAGEMENT', 'HOUSEKEEPING', 'FOOD SAFETY', 'GUEST RELATIONS',
+    'QUALITY ASSURANCE', 'QUALITY CONTROL', 'PROJECT MANAGEMENT', 'LNG OPERATIONS'
 ]
 
 def extract_contacts(text):
@@ -202,52 +280,109 @@ def screen_candidate():
     return jsonify(response_payload)
 
 
-# ── Aliases for Magic Search query parsing ───────────────────────────────
+# -- Aliases for Magic Search query parsing --
 SKILL_ALIASES = {
-    'react': 'REACT', 'reactjs': 'REACT',
-    'typescript': 'TYPESCRIPT', 'ts': 'TYPESCRIPT',
-    'javascript': 'JAVASCRIPT', 'js': 'JAVASCRIPT',
-    'python': 'PYTHON', 'py': 'PYTHON',
-    'sql': 'SQL', 'database': 'SQL',
-    'git': 'GIT', 'github': 'GIT',
-    'docker': 'DOCKER', 'container': 'DOCKER',
-    'aws': 'AWS', 'cloud': 'AWS',
+    'hse': 'HSE RISK MANAGEMENT', 'safety': 'HSE RISK MANAGEMENT', 'ehs': 'HSE RISK MANAGEMENT',
+    'qaqc': 'QUALITY ASSURANCE', 'qa/qc': 'QUALITY ASSURANCE', 'qa': 'QUALITY ASSURANCE', 'qc': 'QUALITY CONTROL',
+    'ndt': 'WELL LOGGING', 'non destructive testing': 'WELL LOGGING',
+    'p6': 'PRIMAVERA P6', 'primavera': 'PRIMAVERA P6',
+    'plc': 'DCS CONTROL', 'dcs': 'DCS CONTROL', 'programmable logic controller': 'DCS CONTROL', 'distributed control system': 'DCS CONTROL',
+    'mep': 'MEP SYSTEMS', 'mechanical electrical plumbing': 'MEP SYSTEMS',
+    'hvac': 'HVAC SYSTEMS', 'heating ventilation air conditioning': 'HVAC SYSTEMS',
+    'pm': 'PROJECT MANAGEMENT', 'pmo': 'PROJECT MANAGEMENT', 'project management office': 'PROJECT MANAGEMENT',
+    'epc': 'CIVIL ENGINEERING', 'engineering procurement construction': 'CIVIL ENGINEERING',
+    'lng': 'LNG OPERATIONS', 'liquefied natural gas': 'LNG OPERATIONS', 'lpg': 'LNG OPERATIONS', 'cng': 'LNG OPERATIONS',
+    'b.tech': 'CIVIL ENGINEERING', 'bachelor of technology': 'CIVIL ENGINEERING',
+    'b.e.': 'CIVIL ENGINEERING', 'bachelor of engineering': 'CIVIL ENGINEERING',
+    'diploma': 'CIVIL ENGINEERING', 'polytechnic diploma': 'CIVIL ENGINEERING',
+    
+    # Original aliases that are still useful
     'petroleum': 'PETROLEUM PIPING', 'pipeline': 'PETROLEUM PIPING', 'piping': 'PETROLEUM PIPING',
     'drilling': 'DRILLING SIMULATION',
-    'hse': 'HSE RISK MANAGEMENT', 'safety': 'HSE RISK MANAGEMENT',
-    'etap': 'ETAP SAFETY',
-    'rolling stock': 'ROLLING STOCK MAINTENANCE', 'rolling': 'ROLLING STOCK MAINTENANCE',
-    'signaling': 'SIGNALING SYSTEMS', 'cbtc': 'SIGNALING SYSTEMS',
-    'high voltage': 'HIGH VOLTAGE RELAY', 'hv': 'HIGH VOLTAGE RELAY', 'relay': 'HIGH VOLTAGE RELAY',
-    'gis': 'GIS MAINTENANCE',
-    'switchgear': 'SWITCHGEAR TESTING',
-    'scada': 'SCADA CONTROL', 'plc': 'SCADA CONTROL',
-    'nursing': 'NURSING CARE', 'nurse': 'NURSING CARE',
-    'clinical': 'CLINICAL TRIALS', 'trials': 'CLINICAL TRIALS',
-    'figma': 'FIGMA', 'autocad': 'AUTOCAD', 'cad': 'AUTOCAD',
-    'solidworks': 'SOLIDWORKS',
-    'project management': 'PROJECT MANAGEMENT', 'pm': 'PROJECT MANAGEMENT',
-    'well logging': 'WELL LOGGING', 'seismic': 'SEISMIC ANALYSIS',
+    'wellhead': 'WELLHEAD OPERATIONS', 'pipeline integrity': 'PIPELINE INTEGRITY',
+    'process engineering': 'PROCESS ENGINEERING', 'process engineer': 'PROCESS ENGINEERING',
+    'chemical analysis': 'CHEMICAL ANALYSIS',
+    'distillation': 'DISTILLATION OPERATIONS',
+    'plant operations': 'PLANT OPERATIONS',
+    'catalyst': 'CATALYST MANAGEMENT',
+    'process safety': 'PROCESS SAFETY',
+    'civil engineering': 'CIVIL ENGINEERING', 'structural': 'STRUCTURAL DESIGN',
+    'quantity surveying': 'QUANTITY SURVEYING', 'qs': 'QUANTITY SURVEYING',
+    'autocad': 'AUTOCAD', 'cad': 'AUTOCAD',
+    'site management': 'SITE MANAGEMENT',
+    'chiller': 'HVAC SYSTEMS',
+    'facilities management': 'FACILITIES MANAGEMENT', 'fm': 'FACILITIES MANAGEMENT',
+    'building maintenance': 'BUILDING MAINTENANCE',
+    'energy auditing': 'ENERGY AUDITING',
+    'property management': 'PROPERTY MANAGEMENT',
+    'preventive maintenance': 'PREVENTIVE MAINTENANCE', 'ppm': 'PREVENTIVE MAINTENANCE',
+    'ship operations': 'SHIP OPERATIONS',
+    'marine engineering': 'MARINE ENGINEERING',
+    'port logistics': 'PORT LOGISTICS',
+    'cargo handling': 'CARGO HANDLING',
+    'maritime safety': 'MARITIME SAFETY', 'stcw': 'MARITIME SAFETY',
+    'power generation': 'POWER GENERATION', 'power plant': 'POWER GENERATION',
+    'turbine': 'TURBINE MAINTENANCE', 'gas turbine': 'TURBINE MAINTENANCE',
+    'scada': 'DCS CONTROL',
+    'instrumentation': 'INSTRUMENTATION',
+    'boiler': 'BOILER OPERATIONS',
+    'customer service': 'CUSTOMER SERVICE',
+    'food and beverage': 'F&B OPERATIONS', 'f&b': 'F&B OPERATIONS',
+    'barista': 'BARISTA SKILLS', 'coffee': 'BARISTA SKILLS',
+    'hotel management': 'HOTEL MANAGEMENT',
+    'housekeeping': 'HOUSEKEEPING',
+    'food safety': 'FOOD SAFETY',
+    'guest relations': 'GUEST RELATIONS',
 }
 
 DOMAIN_ALIASES = {
     'oil': 'Oil & Gas', 'gas': 'Oil & Gas', 'petroleum': 'Oil & Gas',
     'offshore': 'Oil & Gas', 'refinery': 'Oil & Gas', 'hydrocarbon': 'Oil & Gas',
-    'rail': 'Railway', 'railway': 'Railway', 'metro': 'Railway', 'locomotive': 'Railway',
-    'transit': 'Railway', 'train': 'Railway',
-    'electrical': 'Electrical/Testing', 'voltage': 'Electrical/Testing',
-    'switchgear': 'Electrical/Testing', 'substation': 'Electrical/Testing',
-    'software': 'Information Technology', 'developer': 'Information Technology',
-    'frontend': 'Information Technology', 'backend': 'Information Technology',
-    'healthcare': 'Healthcare', 'medical': 'Healthcare', 'hospital': 'Healthcare',
+    'upstream': 'Oil & Gas', 'downstream': 'Oil & Gas', 'lng': 'Oil & Gas',
+    'petrochemical': 'Petrochemical', 'chemical plant': 'Petrochemical',
+    'cracking': 'Petrochemical', 'feedstock': 'Petrochemical',
+    'construction': 'Construction & Infrastructure', 'civil': 'Construction & Infrastructure',
+    'infrastructure': 'Construction & Infrastructure', 'mep': 'Construction & Infrastructure',
+    'energy': 'Energy', 'renewable': 'Energy', 'solar': 'Energy', 'wind': 'Energy',
+    'facilities': 'Facilities Management', 'hvac': 'Facilities Management',
+    'building services': 'Facilities Management', 'fm': 'Facilities Management',
+    'maritime': 'Maritime & Shipping', 'shipping': 'Maritime & Shipping',
+    'marine': 'Maritime & Shipping', 'vessel': 'Maritime & Shipping',
+    'port': 'Maritime & Shipping', 'seafarer': 'Maritime & Shipping',
+    'power plant': 'Power Plants', 'turbine': 'Power Plants',
+    'boiler': 'Power Plants', 'generator': 'Power Plants',
+    'engineering services': 'Engineering Services', 'mechatronics': 'Engineering Services',
+    'manufacturing': 'Manufacturing', 'production': 'Manufacturing', 'six sigma': 'Manufacturing',
+    'epc': 'EPC', 'procurement': 'EPC',
+    'hotel': 'Hospitality', 'resort': 'Hospitality', 'barista': 'Hospitality',
+    'restaurant': 'Hospitality', 'catering': 'Hospitality', 'hospitality': 'Hospitality',
 }
 
 SPEC_ALIASES = {
-    '13.8kv': '13.8KV', '380kv': '380KV', '765kv': '765KV',
-    'hse certified': 'HSE Certified', 'deepwater': 'Deepwater Drilling',
-    'deepwater drilling': 'Deepwater Drilling', 'etap certified': 'ETAP Certified',
-    'cbtc systems': 'CBTC Systems', 'plc/scada': 'PLC/SCADA Developer',
-    'scada developer': 'PLC/SCADA Developer',
+    'hse certified': 'HSE Certified', 'hse': 'HSE Certified', 'ehs': 'HSE Certified',
+    'nebosh': 'NEBOSH', 'opito': 'OPITO', 'osha': 'OSHA 30', 'osha 10': 'OSHA 10', 'osha 30': 'OSHA 30',
+    'deepwater': 'Deepwater Drilling', 'deepwater drilling': 'Deepwater Drilling',
+    'well logging': 'Well Logging',
+    'process safety management': 'Process Safety Management', 'hazop': 'HAZOP',
+    'mep engineer': 'MEP Engineer',
+    'quantity surveyor': 'Quantity Surveying', 'qs': 'Quantity Surveying',
+    'stcw': 'STCW', 'class 1 marine': 'COC Class I-IV',
+    'deck officer': 'Deck Officer',
+    'gas turbine': 'Turbine Maintenance',
+    'dcs/scada': 'DCS', 'scada operator': 'SCADA',
+    'power plant commissioning': 'Power Plant Commissioning',
+    'hvac specialist': 'HVAC Certification',
+    'facilities manager': 'IFMA CFM',
+    'food safety certified': 'Food Safety',
+    'hospitality management': 'Hospitality Management',
+    'qaqc': 'CQE', 'qa/qc': 'CQE', 'qa': 'CQE', 'qc': 'CQA',
+    'p6': 'Primavera P6', 'primavera': 'Primavera P6',
+    'plc': 'PLC', 'dcs': 'DCS', 'mep': 'MEP Engineer',
+    'hvac': 'HVAC Certification', 'pm': 'PMP', 'pmo': 'PMP',
+    'iso 9001': 'ISO 9001', 'iso 45001': 'ISO 45001 Lead Auditor',
+    'api 510': 'API 510', 'api 570': 'API 570', 'api 653': 'API 653',
+    'six sigma': 'Six Sigma', 'lean': 'Lean Manufacturing',
+    'bim': 'BIM', 'revit': 'Revit',
 }
 
 
@@ -773,3 +908,4 @@ def serve_cv(filename):
 if __name__ == '__main__':
     # Run server locally on standard port 5000
     app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False)
+
