@@ -167,7 +167,19 @@ function App() {
   };
 
   const handleCandidatesParsed = (newCandidates: Candidate[]) => {
-    setCandidates(prev => [...newCandidates, ...prev]);
+    setCandidates(prev => {
+      // Deduplicate to prevent duplicate entries by tracking unique name + email
+      const existingKeys = new Set(prev.map(c => `${c.full_name.toLowerCase().trim()}_${c.email.toLowerCase().trim()}`));
+      const uniqueNew = newCandidates.filter(c => {
+        const key = `${c.full_name.toLowerCase().trim()}_${c.email.toLowerCase().trim()}`;
+        if (existingKeys.has(key)) {
+          return false;
+        }
+        existingKeys.add(key);
+        return true;
+      });
+      return [...uniqueNew, ...prev];
+    });
     addToast(`Successfully screened ${newCandidates.length} candidate CV(s).`, 'success');
   };
 

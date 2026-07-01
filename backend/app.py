@@ -1,4 +1,4 @@
-﻿from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import re
 import os
@@ -148,8 +148,34 @@ SKILLS_POOL = [
     'QUALITY ASSURANCE', 'QUALITY CONTROL', 'PROJECT MANAGEMENT', 'LNG OPERATIONS'
 ]
 
-def extract_contacts(text):
-    """Scan and parse candidate basic info using regular expressions"""
+# Section-header words that are NOT candidate names — blocklist for name parser
+NAME_BLOCKLIST = {
+    'CONTACT ME', 'CONTACT', 'CONTACTS', 'RESUME', 'CV', 'CURRICULUM VITAE',
+    'CURRICULUM', 'VITAE', 'PROFILE', 'PERSONAL DETAILS', 'PERSONAL INFORMATION',
+    'PERSONAL PROFILE', 'ABOUT ME', 'OBJECTIVE', 'SUMMARY', 'CAREER SUMMARY',
+    'CAREER OBJECTIVE', 'PROFESSIONAL SUMMARY', 'INTRODUCTION', 'BIO', 'BIOGRAPHY',
+    'NAME', 'FULL NAME', 'CANDIDATE', 'APPLICANT'
+}
+
+# Job titles and placeholder template words that should never be extracted as a candidate's name
+TITLE_GENERIC_KEYWORDS = {
+    'ENGINEER', 'DEVELOPER', 'MANAGER', 'ANALYST', 'DESIGNER', 'OFFICER', 
+    'TECHNICIAN', 'OPERATOR', 'DIRECTOR', 'SUPERVISOR', 'FOREMAN', 'INSPECTOR', 
+    'SPECIALIST', 'CONSULTANT', 'CHIEF', 'ADMINISTRATOR', 'LEAD', 'COORDINATOR', 
+    'ARCHITECT', 'SURNAME', 'FORENAME', 'FIRSTNAME', 'LASTNAME', 'MIDDLE',
+    'RESUME', 'CV', 'CURRICULUM', 'VITAE', 'CONTACT', 'PROFILE', 'OBJECTIVE',
+    'SUMMARY', 'EDUCATION', 'EXPERIENCE', 'SKILLS', 'PROJECTS', 'CERTIFICATIONS',
+    'ADDITIONAL', 'INFORMATION', 'DETAILS', 'LANGUAGES', 'HOBBIES', 'INTERESTS',
+    'PERSONAL', 'WORK', 'HISTORY', 'EMPLOYMENT', 'CAREER', 'QUALIFICATIONS'
+}
+
+def extract_contacts(text, file_hint=''):
+    """Scan and parse candidate basic info using regular expressions.
+    
+    file_hint: the original uploaded filename (without extension) used as a
+               last-resort name fallback when the CV text does not yield a
+               clean candidate name.
+    """
     email_regex = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
     phone_regex = r'(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}'
     
@@ -159,36 +185,133 @@ def extract_contacts(text):
     email = email_match.group(0) if email_match else "N/A"
     phone = phone_match.group(0) if phone_match else "N/A"
     
-    # Try to parse candidate name from top lines
+    # Try to parse candidate name from the first 8 non-empty lines.
+    # Rules:
+    #   - 2 to 5 words (allow titles like "Dr. John Smith")
+    #   - No digits
+    #   - No email @
+    #   - Not a known section-header word (blocklist)
+    #   - Does not contain common job titles or placeholder keywords
     lines = [line.strip() for line in text.split('\n') if line.strip()]
-    full_name = "Unknown Candidate"
-    for line in lines[:3]:
-        # Simple heuristic: line with 2-4 words, no numbers, no special symbols, no email
-        if (2 <= len(line.split()) <= 4) and not re.search(r'\d', line) and '@' not in line:
-            full_name = line
-            break
+    full_name = None
+    for line in lines[:8]:
+        words = line.split()
+        if not (2 <= len(words) <= 5):
+            continue
+        if re.search(r'\d', line):
+            continue
+        if '@' in line:
+            continue
+        # Reject lines that are entirely punctuation / symbols
+        if re.fullmatch(r'[^\w\s]+', line):
+            continue
+        # Reject known section headers (case-insensitive exact match)
+        if line.upper().strip() in NAME_BLOCKLIST:
+            continue
+        # Reject lines containing any forbidden job title or generic placeholder keywords
+        words_cleaned = [re.sub(r'[^\w]', '', w.upper()) for w in words]
+        if any(w in TITLE_GENERIC_KEYWORDS for w in words_cleaned):
+            continue
+        # Accept: looks like a proper name
+        full_name = line
+        break
+
+    # Fallback 1: derive name from the uploaded filename
+    # e.g. "John_Smith_CV.pdf" -> "John Smith"
+    if full_name is None and file_hint:
+        stem = os.path.splitext(file_hint)[0]          # strip extension if present
+        stem = re.sub(r'(?i)(_cv|_resume|_application|\d{4,}).*$', '', stem)
+        stem = re.sub(r'[_\-]+', ' ', stem).strip()
+        stem_words = stem.split()
+        # Clean any generic/title words from the filename as well
+        stem_words_cleaned = [re.sub(r'[^\w]', '', w.upper()) for w in stem_words]
+        if 2 <= len(stem_words) <= 5 and not re.search(r'\d', stem) and not any(w in TITLE_GENERIC_KEYWORDS for w in stem_words_cleaned):
+            full_name = stem.title()
+
+    # Fallback 2: generic placeholder
+    if full_name is None:
+        full_name = "Unknown Candidate"
             
     return full_name, email, phone
 
 def parse_experience_years(text):
     """Estimate total experience years from textual descriptions"""
-    # Look for patterns like "8+ years of experience" or "10 years experience"
-    exp_patterns = [
-        r'(\d+)\+?\s*years?\s+(?:of\s+)?experience',
-        r'(\d+)\+?\s*yrs?\s+(?:of\s+)?experience',
-        r'experience[:\s]+(\d+)\+?\s*years'
+    text_lower = text.lower()
+    
+    # 1. Search for explicit "total", "overall", or "work" experience patterns
+    explicit_patterns = [
+        r'(?:total|overall|work|professional|industry)\s+experience\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(?:years?|yrs?)',
+        r'(\d+(?:\.\d+)?)\s*(?:years?|yrs?)\s+(?:of\s+)?(?:total|overall|work|professional|industry)?\s*experience',
+        r'experience\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(?:years?|yrs?)',
     ]
-    for pattern in exp_patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
+    for pattern in explicit_patterns:
+        match = re.search(pattern, text_lower)
         if match:
-            return float(match.group(1))
-            
-    # Heuristic fallback: count typical resume structure occurrences or return average
-    return 5.0
+            try:
+                val = float(match.group(1))
+                if 0 < val < 50:
+                    return val
+            except ValueError:
+                pass
 
-def score_candidate_data(candidate_text, target_domain):
+    # 2. Search for any pattern of "N years" or "N yrs"
+    all_yr_matches = re.findall(r'\b(\d{1,2})\+?\s*(?:years?|yrs?)\b', text_lower)
+    if all_yr_matches:
+        try:
+            vals = [float(x) for x in all_yr_matches]
+            valid_vals = [v for v in vals if 0 < v < 50]
+            if valid_vals:
+                # The maximum years value usually represents total experience
+                return max(valid_vals)
+        except ValueError:
+            pass
+
+    # 3. Date-range heuristic (e.g. 2018 - present)
+    years = re.findall(r'\b(20[0-2][0-9]|19[8-9][0-9])\b', text_lower)
+    if years:
+        try:
+            year_vals = [int(y) for y in years]
+            min_year = min(year_vals)
+            max_year = max(year_vals)
+            if "present" in text_lower or "current" in text_lower:
+                max_year = max(max_year, 2026)
+            diff = max_year - min_year
+            if 0 < diff < 45:
+                return float(diff)
+        except Exception:
+            pass
+            
+    # Default fallback
+    return 7.0
+
+# Domains considered "adjacent heavy industry" — these share significant
+# skillset overlap with engineering-heavy targets (e.g. commissioning, testing,
+# instrumentation) and should receive a PARTIAL match rather than a full penalty.
+ADJACENT_DOMAIN_MAP = {
+    # target_domain -> set of candidate domains treated as partial match
+    'Oil & Gas':                  {'Power Plants', 'EPC', 'Petrochemical', 'Manufacturing', 'Energy', 'Engineering Services'},
+    'Petrochemical':              {'Oil & Gas', 'Power Plants', 'EPC', 'Manufacturing', 'Energy'},
+    'Power Plants':               {'Oil & Gas', 'EPC', 'Energy', 'Petrochemical', 'Manufacturing', 'Engineering Services'},
+    'EPC':                        {'Oil & Gas', 'Power Plants', 'Petrochemical', 'Construction & Infrastructure', 'Manufacturing'},
+    'Energy':                     {'Power Plants', 'Oil & Gas', 'EPC', 'Petrochemical', 'Facilities Management'},
+    'Construction & Infrastructure': {'EPC', 'Facilities Management', 'Engineering Services', 'Manufacturing'},
+    'Facilities Management':      {'Construction & Infrastructure', 'Energy', 'Engineering Services', 'Manufacturing'},
+    'Manufacturing':              {'EPC', 'Engineering Services', 'Power Plants', 'Oil & Gas'},
+    'Engineering Services':       {'Manufacturing', 'EPC', 'Power Plants', 'Construction & Infrastructure'},
+    'Maritime & Shipping':        {'Engineering Services', 'Oil & Gas'},
+}
+
+def score_candidate_data(candidate_text, target_domain, file_hint=''):
+    """Screen a candidate CV against a target domain.
+    
+    Parameters
+    ----------
+    candidate_text : str   Raw text extracted from the CV file.
+    target_domain  : str   The hiring domain selected by the recruiter.
+    file_hint      : str   Original uploaded filename used as name-parsing fallback.
+    """
     # Extract candidate metadata
-    full_name, email, phone = extract_contacts(candidate_text)
+    full_name, email, phone = extract_contacts(candidate_text, file_hint=file_hint)
     total_exp = parse_experience_years(candidate_text)
     
     # Identify skills present in resume
@@ -210,49 +333,82 @@ def score_candidate_data(candidate_text, target_domain):
     for domain, keywords in DOMAIN_TAXONOMY.items():
         count = 0
         for kw in keywords:
-            # Match whole words or boundary combinations
             matches = re.findall(rf'\b{re.escape(kw)}\b', text_lower)
             count += len(matches)
         domain_scores[domain] = count
 
-    # Determine candidate's main domain by frequency density
-    candidate_domain = 'Information Technology'
-    max_count = 0
-    for domain, count in domain_scores.items():
-        if count > max_count:
-            max_count = count
-            candidate_domain = domain
+    # Determine candidate's primary domain by keyword frequency
+    candidate_domain = max(domain_scores, key=domain_scores.get)
+    max_count = domain_scores[candidate_domain]
 
-    # Determine Domain Match
-    is_domain_match = (candidate_domain == target_domain)
-    
-    # Matching Logic & Mismatch Penalty execution
+    # Determine match tier
+    is_exact_match   = (candidate_domain == target_domain)
+    adjacent_domains = ADJACENT_DOMAIN_MAP.get(target_domain, set())
+    is_adjacent_match = (not is_exact_match) and (candidate_domain in adjacent_domains)
+
+    # ── Matching Logic ────────────────────────────────────────────────────────
     relevant_exp = total_exp
-    match_score = 50 # Base score
+    match_score  = 50  # default base
 
-    if not is_domain_match and max_count >= 2:
-        # Candidate's experience belongs to another industry (e.g. Railway)
-        # Apply Mismatch Penalty: Cap match score to under 35%
-        relevant_exp = float(round(total_exp * 0.15, 2))
-        match_score = int(22 + (max_count % 10)) # Yields 22-31% capping under 35%
-        
-        remarks = (
-            f"Domain Mismatch Penalty. Candidate has {total_exp:.1f} years of overall experience, "
-            f"but their footprint is heavily concentrated in the {candidate_domain} industry (keyword density: {max_count}). "
-            f"They lack the necessary specialized domain experience in {target_domain}."
-        )
-    else:
-        # Match matches target domain or has no clear industry footprint, evaluate normally
+    if is_exact_match or max_count < 2:
+        # ── TIER 1: Exact domain match (or too few keywords to penalise) ──
         skill_factor = min(40, len(skills_matrix) * 8)
-        exp_factor = min(40, total_exp * 6)
-        spec_factor = min(20, len(specialization_tags) * 10)
-        
-        match_score = int(skill_factor + exp_factor + spec_factor)
-        match_score = max(10, min(100, match_score)) # Clamp between 10 and 100
-        
+        exp_factor   = min(40, total_exp * 5)        # 5 pts/yr, caps at 40
+        spec_factor  = min(20, len(specialization_tags) * 10)
+        match_score  = int(skill_factor + exp_factor + spec_factor)
+        match_score  = max(10, min(100, match_score))
+
+        if skills_matrix:
+            remarks = (
+                f"Strong Domain Match. Candidate possesses {relevant_exp:.1f} years of experience "
+                f"in {target_domain} with matching industry-specific skills "
+                f"({', '.join(skills_matrix[:4])})."
+            )
+        else:
+            remarks = (
+                f"Domain Match. Candidate has {relevant_exp:.1f} years of experience in "
+                f"{target_domain}. No specific skills detected from CV text."
+            )
+
+    elif is_adjacent_match:
+        # ── TIER 2: Adjacent / closely related heavy-industry domain ──
+        # These candidates bring transferable technical skills (commissioning,
+        # instrumentation, maintenance) that are highly relevant even though
+        # the sector label differs.
+        skill_factor   = min(35, len(skills_matrix) * 7)
+        exp_factor     = min(30, total_exp * 4)      # still rewards experience
+        spec_factor    = min(15, len(specialization_tags) * 8)
+        adjacency_base = 20                           # partial-match base credit
+        match_score    = int(adjacency_base + skill_factor + exp_factor + spec_factor)
+        match_score    = max(42, min(80, match_score))  # floor 42%, ceiling 80%
+
+        # Relevant exp: credit 60% of total for adjacent domain
+        relevant_exp   = round(total_exp * 0.60, 1)
+
         remarks = (
-            f"Strong Domain Match. Candidate possesses {relevant_exp:.1f} years of experience in {target_domain} "
-            f"with matching industry-specific skills ({', '.join(skills_matrix[:4])})."
+            f"Adjacent Domain Match. Candidate has {total_exp:.1f} years of experience in "
+            f"{candidate_domain}, which shares substantial technical overlap with {target_domain} "
+            f"(commissioning, instrumentation, maintenance engineering). "
+            f"Estimated {relevant_exp:.1f} years of transferable relevant experience. "
+            f"Matched skills: {', '.join(skills_matrix[:4]) if skills_matrix else 'General Technical'}."
+        )
+
+    else:
+        # ── TIER 3: True domain mismatch (e.g. Hospitality vs Oil & Gas) ──
+        # Apply a meaningful penalty, but still credit strong total experience
+        # with a floor so scores don't irrationally plunge below ~38%.
+        exp_floor     = min(18, total_exp * 2.0)    # up to 18 pts from raw exp
+        skill_bonus   = min(10, len(skills_matrix) * 2)  # small transferable bonus
+        mismatch_base = 20
+        match_score   = int(mismatch_base + exp_floor + skill_bonus)
+        match_score   = max(20, min(48, match_score))  # hard cap 20–48%
+
+        relevant_exp  = round(total_exp * 0.15, 1)
+
+        remarks = (
+            f"Domain Mismatch. Candidate has {total_exp:.1f} years of experience, but their "
+            f"background is concentrated in {candidate_domain} (keyword density: {max_count}). "
+            f"This does not align well with the required {target_domain} domain expertise."
         )
 
     return {
@@ -274,9 +430,10 @@ def screen_candidate():
         return jsonify({"error": "Missing parameters 'candidate_text' or 'target_domain'"}), 400
         
     candidate_text = data['candidate_text']
-    target_domain = data['target_domain']
+    target_domain  = data['target_domain']
+    file_hint      = data.get('file_hint', '')   # optional filename fallback for name parsing
     
-    response_payload = score_candidate_data(candidate_text, target_domain)
+    response_payload = score_candidate_data(candidate_text, target_domain, file_hint=file_hint)
     return jsonify(response_payload)
 
 
@@ -841,7 +998,7 @@ def gdrive_import():
             file_size = os.path.getsize(file_path)
             
             raw_text = extract_text_from_file(file_path)
-            scored_data = score_candidate_data(raw_text, target_domain)
+            scored_data = score_candidate_data(raw_text, target_domain, file_hint=file_name)
             
             candidates.append({
                 "fileName": file_name,
@@ -892,8 +1049,8 @@ def upload_cv():
     # Extract text from the saved file
     raw_text = extract_text_from_file(save_path)
 
-    # Run AI screening
-    scored = score_candidate_data(raw_text, target_domain)
+    # Run AI screening, passing the original filename as a name-parsing hint
+    scored = score_candidate_data(raw_text, target_domain, file_hint=file.filename)
     scored['cv_file_name'] = unique_name
 
     return jsonify(scored)

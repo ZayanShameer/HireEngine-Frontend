@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Upload, FileText, CheckCircle, AlertCircle, RefreshCw, Layers, Plus, ChevronDown, ChevronUp, User, ChevronRight, LayoutList, LayoutGrid, X, CloudDownload, FolderOpen } from 'lucide-react';
+import { Upload, FileText, CheckCircle, AlertCircle, RefreshCw, Layers, Plus, ChevronDown, ChevronUp, User, ChevronRight, LayoutList, LayoutGrid, X, CloudDownload, FolderOpen, FileSpreadsheet } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { QueueItem, Requisition, Candidate, TargetDomain } from '../types';
 
@@ -38,6 +38,9 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
   const [driveImporting, setDriveImporting] = useState(false);
   const [driveError, setDriveError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const csvInputRef   = useRef<HTMLInputElement>(null);
+  const [csvImporting, setCsvImporting] = useState(false);
+  const [csvError,     setCsvError]     = useState<string | null>(null);
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -86,6 +89,96 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
 
     try {
       const fileExt = file.name.split('.').pop()?.toLowerCase();
+
+      // ── CSV Master Tracker path ─────────────────────────────────────────────
+      if (fileExt === 'csv') {
+        updateProgress(20, 'extracting');
+        const data = await file.arrayBuffer();
+        const workbook = XLSX.read(data, { type: 'array' });
+        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(worksheet, { defval: '' }) as any[];
+        updateProgress(50, 'scoring');
+
+        // Suitability → score + domain tags mapping
+        const suitabilityScore = (raw: string): { score: number; tags: string[]; label: string } => {
+          const s = raw.toLowerCase().trim();
+          if (s.includes('not suitable') || s.includes('unsuitable') || s.includes('no'))
+            return { score: 22, tags: ['Not Suitable'], label: 'Not Suitable' };
+          if (s.includes('highly suitable') || s.includes('excellent') || s.includes('strongly recommended'))
+            return { score: 88, tags: ['Highly Suitable'], label: 'Highly Suitable' };
+          if (s.includes('suitable') || s.includes('yes') || s.includes('recommended'))
+            return { score: 72, tags: ['Suitable'], label: 'Suitable' };
+          if (s.includes('power plant') || s.includes('powerplant'))
+            return { score: 78, tags: ['Power Plants', 'Suitable'], label: 'Suitable — Power Plants' };
+          if (s.includes('epc'))
+            return { score: 74, tags: ['EPC', 'Suitable'], label: 'Suitable — EPC' };
+          if (s.includes('maintenance'))
+            return { score: 70, tags: ['Maintenance', 'Suitable'], label: 'Suitable — Maintenance' };
+          if (s.includes('partial') || s.includes('consider'))
+            return { score: 52, tags: ['Partial Match'], label: 'Partial Match' };
+          // default: treat non-empty value as partial
+          if (s.length > 0)
+            return { score: 55, tags: ['Reviewed'], label: s };
+          return { score: 50, tags: [], label: 'Unspecified' };
+        };
+
+        const parsedCandidates: Candidate[] = [];
+        for (let i = 0; i < rows.length; i++) {
+          const row = rows[i];
+          // Flexible column finder — normalises key casing and common separators
+          const getCol = (aliases: string[]) => {
+            const k = Object.keys(row).find(key =>
+              aliases.includes(key.toUpperCase().replace(/[\s._\-]/g, ''))
+            );
+            return k ? String(row[k]).trim() : '';
+          };
+
+          const fullName   = getCol(['NAME', 'FULLNAME', 'CANDIDATENAME']) || `Candidate #${i + 1}`;
+          const position   = getCol(['POSITION', 'ROLE', 'JOBTITLE', 'FIELD']) || activeRequisition?.job_title || '';
+          const suitRaw    = getCol(['SUITABILITY', 'SUITABLE', 'STATUS', 'RATING', 'RECOMMENDATION']) || '';
+          const remarksRaw = getCol(['REMARKS', 'NOTES', 'COMMENT', 'FEEDBACK', 'OBSERVATION']) || '';
+          const phone      = getCol(['CONTACTNO', 'PHONE', 'MOBILE', 'PHONENO']) || 'N/A';
+          const email      = getCol(['EMAIL', 'MAILID', 'EMAILID']) || 'N/A';
+
+          const { score, tags, label } = suitabilityScore(suitRaw);
+          const remarksCombined = [
+            label ? `Suitability: ${label}` : null,
+            position ? `Position: ${position}` : null,
+            remarksRaw || null
+          ].filter(Boolean).join(' | ');
+
+          parsedCandidates.push({
+            id: Math.floor(Math.random() * 1000000),
+            requisition_id: activeRequisition!.id,
+            full_name: fullName,
+            email, phone,
+            passport_number: null,
+            current_stage: 'Screening',
+            total_experience_years: 0,
+            relevant_experience_years: 0,
+            match_score: score,
+            skills_matrix: tags.length > 0 ? tags : ['GENERAL TECHNICAL'],
+            specialization_tags: tags,
+            industry_remarks: remarksCombined,
+            created_at: new Date().toISOString()
+          });
+        }
+
+        updateProgress(100, 'completed', parsedCandidates.length > 0 ? {
+          full_name: `${parsedCandidates.length} Candidates Ingested`,
+          email: `CSV master tracker — ${file.name}`,
+          phone: '',
+          match_score: Math.round(
+            parsedCandidates.reduce((a, c) => a + c.match_score, 0) / parsedCandidates.length
+          ),
+          total_experience_years: 0,
+          relevant_experience_years: 0,
+          skills_matrix: Array.from(new Set(parsedCandidates.flatMap(c => c.skills_matrix))).slice(0, 5),
+          industry_remarks: `Successfully ingested ${parsedCandidates.length} candidates from CSV tracker.`
+        } : undefined);
+        onCandidatesParsed(parsedCandidates);
+        return;
+      }
 
       // ── Excel path (unchanged) ──────────────────────────────────────────────
       if (fileExt === 'xlsx' || fileExt === 'xls') {
@@ -167,7 +260,7 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
         if (uploadResp.ok) {
           const resJson = await uploadResp.json();
           candidateResult = {
-            full_name: resJson.full_name || file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' '),
+            full_name: resJson.full_name || cleanFileNameToName(file.name),
             email: resJson.email,
             phone: resJson.phone,
             total_experience_years: resJson.total_experience_years,
@@ -204,7 +297,7 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
           if (response.ok) {
             const resJson = await response.json();
             candidateResult = {
-              full_name: resJson.full_name || file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' '),
+              full_name: resJson.full_name || cleanFileNameToName(file.name),
               email: resJson.email || extractEmailRegex(rawText),
               phone: resJson.phone || extractPhoneRegex(rawText),
               total_experience_years: resJson.total_experience_years,
@@ -218,7 +311,7 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
         } catch {
           const localScreen = calculateLocalScreening(rawText, activeRequisition!);
           candidateResult = {
-            full_name: extractNameFromText(rawText) || file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' '),
+            full_name: extractNameFromText(rawText) || cleanFileNameToName(file.name),
             email: extractEmailRegex(rawText),
             phone: extractPhoneRegex(rawText),
             total_experience_years: localScreen.totalExperience,
@@ -384,6 +477,32 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
     }
   };
 
+  // ── Master CSV import handler ───────────────────────────────────────────────
+  const handleCsvImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    if (!activeRequisition) {
+      alert('Please select or create a Job Requisition first!');
+      return;
+    }
+    setCsvError(null);
+    setCsvImporting(true);
+    const file = files[0];
+    e.target.value = '';
+
+    const newItem: QueueItem = {
+      id: Math.random().toString(36).substring(2, 9),
+      fileName: `[CSV] ${file.name}`,
+      fileSize: file.size,
+      progress: 0,
+      status: 'pending'
+    };
+    setQueue(prev => [...prev, newItem]);
+    processFile(file, newItem.id)
+      .catch(err => setCsvError(err?.message || 'CSV import failed.'))
+      .finally(() => setCsvImporting(false));
+  };
+
   const extractTextFromPDF = async (arrayBuffer: ArrayBuffer, onPageExtract: (pct: number) => void): Promise<string> => {
     const pdfjsLib = (window as any)['pdfjs-dist/build/pdf'];
     if (!pdfjsLib) throw new Error('PDF.js library not loaded. Please check internet connection.');
@@ -414,11 +533,65 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
     return match ? match[0].toUpperCase() : null;
   };
 
+  const cleanFileNameToName = (fileName: string): string => {
+    let stem = fileName.replace(/\.[^/.]+$/, ''); // Strip extension
+    // Strip common metadata postfixes
+    stem = stem.replace(/(?i)(_cv|_resume|_application|\d{4,}).*$/, '');
+    stem = stem.replace(/[_\-]+/g, ' ').trim();
+    
+    // Check if filename contains forbidden generic title keywords
+    const forbiddenKeywords = new Set([
+      'ENGINEER', 'DEVELOPER', 'MANAGER', 'ANALYST', 'DESIGNER', 'OFFICER', 
+      'TECHNICIAN', 'OPERATOR', 'DIRECTOR', 'SUPERVISOR', 'FOREMAN', 'INSPECTOR', 
+      'SPECIALIST', 'CONSULTANT', 'CHIEF', 'ADMINISTRATOR', 'LEAD', 'COORDINATOR', 
+      'ARCHITECT', 'SURNAME', 'FORENAME', 'FIRSTNAME', 'LASTNAME', 'MIDDLE',
+      'RESUME', 'CV', 'CURRICULUM', 'VITAE', 'CONTACT', 'PROFILE'
+    ]);
+    
+    const words = stem.split(/\s+/);
+    const cleanedWords = words.filter(w => !forbiddenKeywords.has(w.toUpperCase().replace(/[^\w]/g, '')));
+    if (cleanedWords.length >= 2) {
+      stem = cleanedWords.join(' ');
+    }
+    
+    if (stem.length > 0) {
+      return stem.replace(/\b\w/g, c => c.toUpperCase());
+    }
+    return 'Unknown Candidate';
+  };
+
   const extractNameFromText = (text: string): string | null => {
+    const nameBlocklist = new Set([
+      'CONTACT ME', 'CONTACT', 'CONTACTS', 'RESUME', 'CV', 'CURRICULUM VITAE',
+      'CURRICULUM', 'VITAE', 'PROFILE', 'PERSONAL DETAILS', 'PERSONAL INFORMATION',
+      'PERSONAL PROFILE', 'ABOUT ME', 'OBJECTIVE', 'SUMMARY', 'CAREER SUMMARY',
+      'CAREER OBJECTIVE', 'PROFESSIONAL SUMMARY', 'INTRODUCTION', 'BIO', 'BIOGRAPHY',
+      'NAME', 'FULL NAME', 'CANDIDATE', 'APPLICANT'
+    ]);
+    const forbiddenKeywords = new Set([
+      'ENGINEER', 'DEVELOPER', 'MANAGER', 'ANALYST', 'DESIGNER', 'OFFICER', 
+      'TECHNICIAN', 'OPERATOR', 'DIRECTOR', 'SUPERVISOR', 'FOREMAN', 'INSPECTOR', 
+      'SPECIALIST', 'CONSULTANT', 'CHIEF', 'ADMINISTRATOR', 'LEAD', 'COORDINATOR', 
+      'ARCHITECT', 'SURNAME', 'FORENAME', 'FIRSTNAME', 'LASTNAME', 'MIDDLE',
+      'RESUME', 'CV', 'CURRICULUM', 'VITAE', 'CONTACT', 'PROFILE', 'OBJECTIVE',
+      'SUMMARY', 'EDUCATION', 'EXPERIENCE', 'SKILLS', 'PROJECTS', 'CERTIFICATIONS',
+      'ADDITIONAL', 'INFORMATION', 'DETAILS', 'LANGUAGES', 'HOBBIES', 'INTERESTS',
+      'PERSONAL', 'WORK', 'HISTORY', 'EMPLOYMENT', 'CAREER', 'QUALIFICATIONS'
+    ]);
+
     const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-    for (let i = 0; i < Math.min(3, lines.length); i++) {
-      const words = lines[i].split(' ');
-      if (words.length >= 2 && words.length <= 4 && !lines[i].includes('@')) return lines[i];
+    for (let i = 0; i < Math.min(8, lines.length); i++) {
+      const line = lines[i];
+      const words = line.split(/\s+/);
+      if (!(words.length >= 2 && words.length <= 5)) continue;
+      if (line.includes('@')) continue;
+      if (/\d/.test(line)) continue;
+      if (nameBlocklist.has(line.toUpperCase())) continue;
+      
+      const cleanedWords = words.map(w => w.replace(/[^\w]/g, '').toUpperCase());
+      if (cleanedWords.some(w => forbiddenKeywords.has(w))) continue;
+      
+      return line;
     }
     return null;
   };
@@ -446,8 +619,31 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
     const extractedSkills = commonSkills.filter(skill => cleanText.includes(skill)).map(s => s.toUpperCase());
 
     let totalExperience = 0;
-    const expMatches = cleanText.match(/(\d+)\+?\s*years?\s+(?:of\s+)?experience/);
-    totalExperience = expMatches ? parseInt(expMatches[1], 10) : Math.floor(Math.random() * 8) + 2;
+    const expMatches = cleanText.match(/(?:total|overall|work|professional|industry)?\s*experience\s*[:\-]?\s*(\d+)\s*(?:years?|yrs?)/i) 
+      || cleanText.match(/(\d+)\+?\s*(?:years?|yrs?)\s+(?:of\s+)?(?:total|overall|work|professional|industry)?\s*experience/i);
+      
+    if (expMatches) {
+      totalExperience = parseInt(expMatches[1], 10);
+    } else {
+      const allMatches = cleanText.match(/\b(\d+)\+?\s*(?:years?|yrs?)\b/g);
+      if (allMatches && allMatches.length > 0) {
+        const parsedVals = allMatches.map(m => parseInt(m, 10)).filter(v => v > 0 && v < 50);
+        totalExperience = parsedVals.length > 0 ? Math.max(...parsedVals) : 7;
+      } else {
+        const years = cleanText.match(/\b(20[0-2][0-9]|19[8-9][0-9])\b/g)?.map(y => parseInt(y, 10));
+        if (years && years.length > 0) {
+          const minYear = Math.min(...years);
+          let maxYear = Math.max(...years);
+          if (cleanText.includes('present') || cleanText.includes('current')) {
+            maxYear = Math.max(maxYear, 2026);
+          }
+          const diff = maxYear - minYear;
+          totalExperience = (diff > 0 && diff < 45) ? diff : 7;
+        } else {
+          totalExperience = 7;
+        }
+      }
+    }
 
     const currentDomain = req.target_domain;
     const domainCounts = Object.keys(domainTaxonomy).reduce((acc, domain) => {
@@ -545,6 +741,7 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
             multiple
             accept=".pdf,.txt,.xlsx,.xls"
             onChange={handleFileChange}
+            onClick={e => e.stopPropagation()}
             className="hidden"
             disabled={!activeRequisition}
           />
@@ -608,6 +805,49 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
               Ensure the Google Drive folder access is set to <strong>"Anyone with the link can view"</strong>. The server will download and process all PDF, Word, and text resumes automatically.
             </p>
           </form>
+        </div>
+
+        {/* ── Upload Master CSV Section ─────────────────────────────────── */}
+        <div className="mt-4 p-5 border border-emerald-500/20 rounded-[var(--radius-md)] bg-emerald-500/[0.02]">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div className="flex flex-col gap-0.5">
+              <div className="flex items-center gap-2 text-[var(--text-primary)]">
+                <FileSpreadsheet className="text-emerald-500 h-4 w-4" />
+                <span className="text-xs font-bold uppercase tracking-wider">Upload Master CSV Tracker</span>
+              </div>
+              <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
+                Accepts <strong>NAME, POSITION, SUITABILITY, remarks</strong> columns. Parses instantly — no PDF engine used.
+              </p>
+            </div>
+            <div className="flex flex-col items-end gap-1.5">
+              <input
+                ref={csvInputRef}
+                type="file"
+                accept=".csv"
+                onChange={handleCsvImport}
+                onClick={e => e.stopPropagation()}
+                className="hidden"
+                disabled={!activeRequisition || csvImporting}
+              />
+              <button
+                type="button"
+                onClick={() => csvInputRef.current?.click()}
+                disabled={!activeRequisition || csvImporting}
+                className="btn text-xs py-2.5 px-5 font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap rounded-[var(--radius-md)] border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 transition-all"
+              >
+                {csvImporting ? (
+                  <><RefreshCw className="h-3.5 w-3.5 animate-spin" /> Importing...</>
+                ) : (
+                  <><FileSpreadsheet className="h-3.5 w-3.5" /> Upload Master CSV</>
+                )}
+              </button>
+              {csvError && (
+                <div className="text-[10px] text-rose-500 flex items-center gap-1">
+                  <AlertCircle className="h-3 w-3" /> {csvError}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Queue List */}
