@@ -1,9 +1,10 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import re
 import os
 import tempfile
 import shutil
+import uuid
 
 # Optional libraries for PDF and DOCX parsing
 try:
@@ -24,6 +25,11 @@ except ImportError:
 app = Flask(__name__)
 # Enable CORS for frontend integration
 CORS(app, resources={r"/api/*": {"origins": "*"}})
+
+# Directory where uploaded CV files are permanently stored
+UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+SUPPORTED_EXTENSIONS = {'.pdf', '.docx', '.doc', '.txt'}
 
 # 1. Domain Taxonomy Dictionary Specifications
 DOMAIN_TAXONOMY = {
@@ -565,6 +571,44 @@ def gdrive_import():
             shutil.rmtree(temp_dir, ignore_errors=True)
         except Exception:
             pass
+
+
+@app.route('/api/v1/upload-cv', methods=['POST'])
+def upload_cv():
+    """Accept a CV file upload, save it permanently, extract text, screen it, and return results."""
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part in request"}), 400
+
+    file = request.files['file']
+    target_domain = request.form.get('target_domain', 'Information Technology')
+
+    if not file or file.filename == '':
+        return jsonify({"error": "No file selected"}), 400
+
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in SUPPORTED_EXTENSIONS:
+        return jsonify({"error": f"Unsupported file type '{ext}'. Accepted: .pdf, .docx, .doc, .txt"}), 400
+
+    # Save with a unique name to avoid collisions
+    safe_original = re.sub(r'[^\w\-. ]', '_', file.filename)
+    unique_name = f"{uuid.uuid4().hex[:8]}_{safe_original}"
+    save_path = os.path.join(UPLOAD_FOLDER, unique_name)
+    file.save(save_path)
+
+    # Extract text from the saved file
+    raw_text = extract_text_from_file(save_path)
+
+    # Run AI screening
+    scored = score_candidate_data(raw_text, target_domain)
+    scored['cv_file_name'] = unique_name
+
+    return jsonify(scored)
+
+
+@app.route('/api/v1/cv/<path:filename>', methods=['GET'])
+def serve_cv(filename):
+    """Serve a stored CV file for download."""
+    return send_from_directory(UPLOAD_FOLDER, filename, as_attachment=True)
 
 
 if __name__ == '__main__':

@@ -161,6 +161,7 @@ body {
   font-size: 1.25rem;
   background: var(--primary-gradient);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
   letter-spacing: -0.5px;
 }
@@ -547,6 +548,7 @@ body {
   border-radius: 2px;
   outline: none;
   -webkit-appearance: none;
+  appearance: none;
   accent-color: var(--primary);
 }
 

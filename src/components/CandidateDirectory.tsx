@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { 
   Search, SlidersHorizontal, Table, LayoutDashboard, User, Mail, 
-  Phone, Briefcase, Award, X, Trash2, Shield, FileUp, Users
+  Phone, Briefcase, Award, X, Trash2, Shield, FileUp, Users, Download
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Candidate, HiringStage, TargetDomain, Requisition } from '../types';
@@ -549,6 +549,23 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                   )}
                 </div>
               </div>
+
+              {/* Download CV — only shown when a file was uploaded to backend */}
+              {selectedCandidate.cv_file_name && (
+                <div className="flex flex-col gap-3">
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                    <Download className="h-4 w-4 text-[var(--primary)]" /> Original CV File
+                  </h4>
+                  <a
+                    href={`http://localhost:5000/api/v1/cv/${selectedCandidate.cv_file_name}`}
+                    download
+                    className="flex items-center justify-center gap-2 py-2.5 px-4 rounded-[var(--radius-md)] border border-[var(--primary)]/40 bg-[var(--primary)]/5 text-[var(--primary)] text-sm font-semibold hover:bg-[var(--primary)]/10 transition-colors"
+                  >
+                    <Download className="h-4 w-4" />
+                    Download {selectedCandidate.cv_file_name.replace(/^[a-f0-9]{8}_/, '')}
+                  </a>
+                </div>
+              )}
 
               {/* Experience Alignment */}
               <div className="flex flex-col gap-3">

@@ -38,6 +38,7 @@ export interface Candidate {
   skills_matrix: string[]; // GIN indexed skills array
   specialization_tags: string[]; // GIN indexed tags (e.g. ['13.8KV', '380KV'])
   industry_remarks: string; // Context-aware validation summary
+  cv_file_name?: string; // Stored filename on backend (e.g. 'a3f9b2c1_John_CV.pdf')
   created_at: string; // ISO Timestamp
 }
 

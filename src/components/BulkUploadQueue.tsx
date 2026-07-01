@@ -6,6 +6,8 @@ import { QueueItem, Requisition, Candidate, TargetDomain } from '../types';
 interface BulkUploadQueueProps {
   activeRequisition: Requisition | null;
   onCandidatesParsed: (candidates: Candidate[]) => void;
+  queue: QueueItem[];
+  setQueue: React.Dispatch<React.SetStateAction<QueueItem[]>>;
 }
 
 // Manual entry form initial state
@@ -21,9 +23,11 @@ const BLANK_MANUAL = {
 
 export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
   activeRequisition,
-  onCandidatesParsed
+  onCandidatesParsed,
+  queue,
+  setQueue
 }) => {
-  const [queue, setQueue] = useState<QueueItem[]>([]);
+  // queue & setQueue are lifted to App.tsx for localStorage persistence
   const [isDragActive, setIsDragActive] = useState(false);
   const [showManualForm, setShowManualForm] = useState(false);
   const [manualForm, setManualForm] = useState(BLANK_MANUAL);
@@ -83,6 +87,7 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
     try {
       const fileExt = file.name.split('.').pop()?.toLowerCase();
 
+      // ── Excel path (unchanged) ──────────────────────────────────────────────
       if (fileExt === 'xlsx' || fileExt === 'xls') {
         updateProgress(20, 'extracting');
         const data = await file.arrayBuffer();
@@ -136,64 +141,96 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
         return;
       }
 
-      let rawText = '';
-      updateProgress(10, 'extracting');
-
-      if (fileExt === 'pdf') {
-        const arrayBuffer = await file.arrayBuffer();
-        rawText = await extractTextFromPDF(arrayBuffer, pct => updateProgress(10 + Math.floor(pct * 40), 'extracting'));
-      } else if (fileExt === 'txt') {
-        rawText = await file.text();
-        updateProgress(50, 'extracting');
-      } else {
-        throw new Error('Unsupported format. Please upload PDF, TXT, or XLSX.');
+      // ── PDF / DOCX / TXT — upload to backend for permanent storage ──────────
+      if (!['pdf', 'docx', 'doc', 'txt'].includes(fileExt ?? '')) {
+        throw new Error('Unsupported format. Please upload PDF, DOCX, TXT, or XLSX.');
       }
 
-      updateProgress(60, 'scoring');
+      updateProgress(15, 'extracting');
 
-      let candidateResult: Partial<Candidate>;
+      let candidateResult: Partial<Candidate> & { cv_file_name?: string } = {};
+      let uploadSucceeded = false;
+
+      // Primary path: multipart upload → backend saves file + screens it
       try {
-        const response = await fetch('/api/v1/screen-candidate', {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('target_domain', activeRequisition!.target_domain);
+        formData.append('requisition_id', String(activeRequisition!.id));
+
+        updateProgress(40, 'extracting');
+        const uploadResp = await fetch('http://localhost:5000/api/v1/upload-cv', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            candidate_text: rawText,
-            target_domain: activeRequisition!.target_domain,
-            requisition_id: activeRequisition!.id
-          })
+          body: formData
         });
-        if (response.ok) {
-          const resJson = await response.json();
+
+        if (uploadResp.ok) {
+          const resJson = await uploadResp.json();
           candidateResult = {
             full_name: resJson.full_name || file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' '),
-            email: resJson.email || extractEmailRegex(rawText),
-            phone: resJson.phone || extractPhoneRegex(rawText),
+            email: resJson.email,
+            phone: resJson.phone,
             total_experience_years: resJson.total_experience_years,
             relevant_experience_years: resJson.relevant_experience_years,
             match_score: resJson.match_score,
             skills_matrix: resJson.skills_matrix,
             specialization_tags: resJson.specialization_tags,
-            industry_remarks: resJson.industry_remarks
+            industry_remarks: resJson.industry_remarks,
+            cv_file_name: resJson.cv_file_name
           };
+          uploadSucceeded = true;
+          updateProgress(90, 'scoring');
         } else {
-          throw new Error('API unavailable, using client engine.');
+          throw new Error('Upload endpoint returned error.');
         }
       } catch {
-        const localScreen = calculateLocalScreening(rawText, activeRequisition!);
-        candidateResult = {
-          full_name: extractNameFromText(rawText) || file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' '),
-          email: extractEmailRegex(rawText),
-          phone: extractPhoneRegex(rawText),
-          total_experience_years: localScreen.totalExperience,
-          relevant_experience_years: localScreen.relevantExperience,
-          match_score: localScreen.score,
-          skills_matrix: localScreen.skills,
-          specialization_tags: localScreen.tags,
-          industry_remarks: localScreen.remarks
-        };
-      }
+        // Fallback: read text client-side, call /api/v1/screen-candidate (no file stored)
+        updateProgress(40, 'extracting');
+        let rawText = '';
+        if (fileExt === 'pdf') {
+          const arrayBuffer = await file.arrayBuffer();
+          rawText = await extractTextFromPDF(arrayBuffer, pct => updateProgress(40 + Math.floor(pct * 20), 'extracting'));
+        } else if (fileExt === 'txt') {
+          rawText = await file.text();
+        }
 
-      updateProgress(90, 'scoring');
+        updateProgress(65, 'scoring');
+        try {
+          const response = await fetch('http://localhost:5000/api/v1/screen-candidate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ candidate_text: rawText, target_domain: activeRequisition!.target_domain })
+          });
+          if (response.ok) {
+            const resJson = await response.json();
+            candidateResult = {
+              full_name: resJson.full_name || file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' '),
+              email: resJson.email || extractEmailRegex(rawText),
+              phone: resJson.phone || extractPhoneRegex(rawText),
+              total_experience_years: resJson.total_experience_years,
+              relevant_experience_years: resJson.relevant_experience_years,
+              match_score: resJson.match_score,
+              skills_matrix: resJson.skills_matrix,
+              specialization_tags: resJson.specialization_tags,
+              industry_remarks: resJson.industry_remarks
+            };
+          } else { throw new Error('Fallback API error'); }
+        } catch {
+          const localScreen = calculateLocalScreening(rawText, activeRequisition!);
+          candidateResult = {
+            full_name: extractNameFromText(rawText) || file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' '),
+            email: extractEmailRegex(rawText),
+            phone: extractPhoneRegex(rawText),
+            total_experience_years: localScreen.totalExperience,
+            relevant_experience_years: localScreen.relevantExperience,
+            match_score: localScreen.score,
+            skills_matrix: localScreen.skills,
+            specialization_tags: localScreen.tags,
+            industry_remarks: localScreen.remarks + (uploadSucceeded ? '' : ' [CV not stored — backend unreachable]')
+          };
+        }
+        updateProgress(90, 'scoring');
+      }
 
       const finalCandidate: Candidate = {
         id: Math.floor(Math.random() * 1000000),
@@ -201,7 +238,7 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
         full_name: candidateResult.full_name || 'Unknown Candidate',
         email: candidateResult.email || 'N/A',
         phone: candidateResult.phone || 'N/A',
-        passport_number: extractPassportRegex(rawText),
+        passport_number: null,
         current_stage: 'Screening',
         total_experience_years: candidateResult.total_experience_years || 0,
         relevant_experience_years: candidateResult.relevant_experience_years || 0,
@@ -209,6 +246,7 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
         skills_matrix: candidateResult.skills_matrix || [],
         specialization_tags: candidateResult.specialization_tags || [],
         industry_remarks: candidateResult.industry_remarks || '',
+        cv_file_name: candidateResult.cv_file_name,
         created_at: new Date().toISOString()
       };
 

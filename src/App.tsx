@@ -79,6 +79,21 @@ function App() {
   const [candidates, setCandidates] = useLocalStorage<Candidate[]>('hireengine_candidates', []);
   const [activeReqId, setActiveReqId] = useLocalStorage<number>('hireengine_active_req', 101);
 
+  // Persisted upload queue — in-flight items are reset to 'failed' on reload
+  const [queue, setQueue] = useLocalStorage<import('./types').QueueItem[]>('hireengine_queue', []);
+  // Reset any stuck in-progress items from a previous session
+  const queueInitialized = React.useRef(false);
+  React.useEffect(() => {
+    if (!queueInitialized.current) {
+      queueInitialized.current = true;
+      setQueue(prev => prev.map(item =>
+        ['pending', 'extracting', 'scoring'].includes(item.status)
+          ? { ...item, status: 'failed' as const, error: 'Interrupted by page refresh' }
+          : item
+      ));
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Toast state
   const [toasts, setToasts] = useState<{ id: string; message: string; type: 'success' | 'info' | 'warning' | 'error' }[]>([]);
 
@@ -163,16 +178,18 @@ function App() {
   };
 
   // Dashboard calculations — real data
-  const totalCVs = candidates.length;
-  const avgScore = totalCVs > 0 ? Math.round(candidates.reduce((sum, c) => sum + c.match_score, 0) / totalCVs) : 0;
-  const shortlistedCount = candidates.filter(c => c.current_stage === 'Shortlist' || c.current_stage === 'Hired' || c.current_stage === 'Offered' || c.current_stage === 'Interviewing').length;
-  const pendingScreen = candidates.filter(c => c.current_stage === 'Screening').length;
-  const rejectedCount = candidates.filter(c => c.current_stage === 'Rejected').length;
+  // Dashboard calculations — scoped to the active requisition
+  const activeCandidates = candidates.filter(c => c.requisition_id === activeReqId);
+  const totalCVs = activeCandidates.length;
+  const avgScore = totalCVs > 0 ? Math.round(activeCandidates.reduce((sum, c) => sum + c.match_score, 0) / totalCVs) : 0;
+  const shortlistedCount = activeCandidates.filter(c => c.current_stage === 'Shortlist' || c.current_stage === 'Hired' || c.current_stage === 'Offered' || c.current_stage === 'Interviewing').length;
+  const pendingScreen = activeCandidates.filter(c => c.current_stage === 'Screening').length;
+  const rejectedCount = activeCandidates.filter(c => c.current_stage === 'Rejected').length;
 
   const oneWeekAgo = new Date(Date.now() - 86400000 * 7).toISOString();
-  const newThisWeek = candidates.filter(c => c.created_at >= oneWeekAgo).length;
+  const newThisWeek = activeCandidates.filter(c => c.created_at >= oneWeekAgo).length;
 
-  const domainStats = candidates.reduce((acc, c) => {
+  const domainStats = activeCandidates.reduce((acc, c) => {
     const reqObj = requisitions.find(r => r.id === c.requisition_id);
     const domainName = reqObj?.target_domain || 'General';
     acc[domainName] = (acc[domainName] || 0) + 1;
@@ -180,11 +197,11 @@ function App() {
   }, {} as Record<string, number>);
 
   const stageStats = STAGES.reduce((acc, stage) => {
-    acc[stage] = candidates.filter(c => c.current_stage === stage).length;
+    acc[stage] = activeCandidates.filter(c => c.current_stage === stage).length;
     return acc;
   }, {} as Record<HiringStage, number>);
 
-  const highMatchCount = candidates.filter(c => c.match_score >= 80).length;
+  const highMatchCount = activeCandidates.filter(c => c.match_score >= 80).length;
 
   return (
     <div className="app-container">
@@ -358,7 +375,7 @@ function App() {
           {activeTab === 'dashboard' && (
             <div className="animate-fade-in">
 
-              {totalCVs === 0 ? (
+              {candidates.length === 0 ? (
                 /* Empty State */
                 <div className="empty-state-container">
                   <div className="empty-state-icon">
@@ -515,9 +532,9 @@ function App() {
                       <h3 className="card-title mb-4">Match Score Distribution</h3>
                       <div className="flex flex-col gap-3">
                         {[
-                          { label: 'High Match (80–100)', count: candidates.filter(c => c.match_score >= 80).length, color: 'bg-emerald-500' },
-                          { label: 'Mid Match (50–79)', count: candidates.filter(c => c.match_score >= 50 && c.match_score < 80).length, color: 'bg-amber-500' },
-                          { label: 'Low Match (0–49)', count: candidates.filter(c => c.match_score < 50).length, color: 'bg-rose-400' },
+                          { label: 'High Match (80–100)', count: activeCandidates.filter(c => c.match_score >= 80).length, color: 'bg-emerald-500' },
+                          { label: 'Mid Match (50–79)', count: activeCandidates.filter(c => c.match_score >= 50 && c.match_score < 80).length, color: 'bg-amber-500' },
+                          { label: 'Low Match (0–49)', count: activeCandidates.filter(c => c.match_score < 50).length, color: 'bg-rose-400' },
                         ].map(({ label, count, color }) => {
                           const pct = totalCVs > 0 ? Math.round((count / totalCVs) * 100) : 0;
                           return (
@@ -540,7 +557,7 @@ function App() {
                         <div className="flex flex-wrap gap-2">
                           {(() => {
                             const skillMap: Record<string, number> = {};
-                            candidates.forEach(c => c.skills_matrix.forEach(s => { skillMap[s] = (skillMap[s] || 0) + 1; }));
+                            activeCandidates.forEach(c => c.skills_matrix.forEach(s => { skillMap[s] = (skillMap[s] || 0) + 1; }));
                             return Object.entries(skillMap).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([skill, count]) => (
                               <span key={skill} className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-[var(--primary-glow)] text-[var(--primary)] border border-[var(--primary)]/20">
                                 {skill} <span className="opacity-60">×{count}</span>
@@ -614,7 +631,9 @@ function App() {
               <div className="flex flex-col">
                 <BulkUploadQueue 
                   activeRequisition={activeRequisition} 
-                  onCandidatesParsed={handleCandidatesParsed} 
+                  onCandidatesParsed={handleCandidatesParsed}
+                  queue={queue}
+                  setQueue={setQueue}
                 />
               </div>
             </div>
