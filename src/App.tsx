@@ -249,7 +249,7 @@ function App() {
         <div className="logo-container">
           <div className="logo select-none">
             <span className="logo-icon">⚡</span>
-            HireEngine AI
+            Hirengine AI
           </div>
         </div>
 
@@ -320,7 +320,7 @@ function App() {
         <div className="sidebar-footer">
           <div className="user-avatar">HR</div>
           <div className="user-info">
-            <span className="user-name">HireEngine Operator</span>
+            <span className="user-name">Hirengine Operator</span>
             <span className="user-role">Lead Recruiter</span>
           </div>
         </div>

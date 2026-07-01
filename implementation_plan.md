@@ -1,6 +1,6 @@
-# HireEngine AI - Implementation & Design Plan
+# Hirengine AI - Implementation & Design Plan
 
-This document outlines the detailed architecture, feature set, design guidelines, and data structures for the **HireEngine AI** resume screening web application.
+This document outlines the detailed architecture, feature set, design guidelines, and data structures for the **Hirengine AI** resume screening web application.
 
 ---
 

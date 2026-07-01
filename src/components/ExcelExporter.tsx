@@ -80,7 +80,7 @@ export const ExcelExporter: React.FC<ExcelExporterProps> = ({
       const dateStamp = new Date().toISOString().split('T')[0];
       
       link.href = url;
-      link.setAttribute('download', `HireEngine_${requisitionName}_Talent_Sheet_${dateStamp}.csv`);
+      link.setAttribute('download', `Hirengine_${requisitionName}_Talent_Sheet_${dateStamp}.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
