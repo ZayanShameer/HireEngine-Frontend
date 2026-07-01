@@ -201,6 +201,165 @@ def screen_candidate():
     response_payload = score_candidate_data(candidate_text, target_domain)
     return jsonify(response_payload)
 
+
+# ── Aliases for Magic Search query parsing ───────────────────────────────
+SKILL_ALIASES = {
+    'react': 'REACT', 'reactjs': 'REACT',
+    'typescript': 'TYPESCRIPT', 'ts': 'TYPESCRIPT',
+    'javascript': 'JAVASCRIPT', 'js': 'JAVASCRIPT',
+    'python': 'PYTHON', 'py': 'PYTHON',
+    'sql': 'SQL', 'database': 'SQL',
+    'git': 'GIT', 'github': 'GIT',
+    'docker': 'DOCKER', 'container': 'DOCKER',
+    'aws': 'AWS', 'cloud': 'AWS',
+    'petroleum': 'PETROLEUM PIPING', 'pipeline': 'PETROLEUM PIPING', 'piping': 'PETROLEUM PIPING',
+    'drilling': 'DRILLING SIMULATION',
+    'hse': 'HSE RISK MANAGEMENT', 'safety': 'HSE RISK MANAGEMENT',
+    'etap': 'ETAP SAFETY',
+    'rolling stock': 'ROLLING STOCK MAINTENANCE', 'rolling': 'ROLLING STOCK MAINTENANCE',
+    'signaling': 'SIGNALING SYSTEMS', 'cbtc': 'SIGNALING SYSTEMS',
+    'high voltage': 'HIGH VOLTAGE RELAY', 'hv': 'HIGH VOLTAGE RELAY', 'relay': 'HIGH VOLTAGE RELAY',
+    'gis': 'GIS MAINTENANCE',
+    'switchgear': 'SWITCHGEAR TESTING',
+    'scada': 'SCADA CONTROL', 'plc': 'SCADA CONTROL',
+    'nursing': 'NURSING CARE', 'nurse': 'NURSING CARE',
+    'clinical': 'CLINICAL TRIALS', 'trials': 'CLINICAL TRIALS',
+    'figma': 'FIGMA', 'autocad': 'AUTOCAD', 'cad': 'AUTOCAD',
+    'solidworks': 'SOLIDWORKS',
+    'project management': 'PROJECT MANAGEMENT', 'pm': 'PROJECT MANAGEMENT',
+    'well logging': 'WELL LOGGING', 'seismic': 'SEISMIC ANALYSIS',
+}
+
+DOMAIN_ALIASES = {
+    'oil': 'Oil & Gas', 'gas': 'Oil & Gas', 'petroleum': 'Oil & Gas',
+    'offshore': 'Oil & Gas', 'refinery': 'Oil & Gas', 'hydrocarbon': 'Oil & Gas',
+    'rail': 'Railway', 'railway': 'Railway', 'metro': 'Railway', 'locomotive': 'Railway',
+    'transit': 'Railway', 'train': 'Railway',
+    'electrical': 'Electrical/Testing', 'voltage': 'Electrical/Testing',
+    'switchgear': 'Electrical/Testing', 'substation': 'Electrical/Testing',
+    'software': 'Information Technology', 'developer': 'Information Technology',
+    'frontend': 'Information Technology', 'backend': 'Information Technology',
+    'healthcare': 'Healthcare', 'medical': 'Healthcare', 'hospital': 'Healthcare',
+}
+
+SPEC_ALIASES = {
+    '13.8kv': '13.8KV', '380kv': '380KV', '765kv': '765KV',
+    'hse certified': 'HSE Certified', 'deepwater': 'Deepwater Drilling',
+    'deepwater drilling': 'Deepwater Drilling', 'etap certified': 'ETAP Certified',
+    'cbtc systems': 'CBTC Systems', 'plc/scada': 'PLC/SCADA Developer',
+    'scada developer': 'PLC/SCADA Developer',
+}
+
+
+def parse_magic_query(query):
+    """Extract intent signals from a natural-language recruiter query."""
+    q = query.lower().strip()
+
+    # Experience years
+    exp_years = None
+    exp_match = re.search(r'(\d+)\+?\s*(?:years?|yrs?)', q)
+    if exp_match:
+        exp_years = float(exp_match.group(1))
+
+    # Skill signals (check multi-word aliases first, then single-word)
+    matched_skills = set()
+    sorted_aliases = sorted(SKILL_ALIASES.keys(), key=len, reverse=True)
+    for alias in sorted_aliases:
+        if alias in q:
+            matched_skills.add(SKILL_ALIASES[alias])
+    for skill in SKILLS_POOL:
+        if skill.lower() in q:
+            matched_skills.add(skill)
+
+    # Domain signals
+    matched_domains = set()
+    for alias, canonical in DOMAIN_ALIASES.items():
+        if re.search(rf'\b{re.escape(alias)}\b', q):
+            matched_domains.add(canonical)
+
+    # Specialization signals
+    matched_specs = set()
+    for alias, canonical in SPEC_ALIASES.items():
+        if alias in q:
+            matched_specs.add(canonical)
+
+    return {'exp_years': exp_years, 'skills': list(matched_skills),
+            'domains': list(matched_domains), 'specs': list(matched_specs)}
+
+
+def score_relevance(candidate, signals):
+    """Score a candidate against parsed query signals. Returns (score, matched_signals)."""
+    score = 0
+    matched = []
+
+    # Skill matches — 30 pts each
+    cand_skills = [s.upper() for s in candidate.get('skills_matrix', [])]
+    for skill in signals['skills']:
+        if skill.upper() in cand_skills:
+            score += 30
+            matched.append(skill)
+
+    # Domain match — 25 pts (once)
+    remarks = candidate.get('industry_remarks', '').lower()
+    for domain in signals['domains']:
+        domain_kws = DOMAIN_TAXONOMY.get(domain, [])
+        if any(kw in remarks for kw in domain_kws):
+            score += 25
+            matched.append(domain)
+            break
+
+    # Specialization tags — 20 pts each
+    cand_specs = [s.lower() for s in candidate.get('specialization_tags', [])]
+    for spec in signals['specs']:
+        if spec.lower() in cand_specs:
+            score += 20
+            matched.append(spec)
+
+    # Experience proximity — up to 15 pts
+    if signals['exp_years'] is not None:
+        cand_exp = float(candidate.get('total_experience_years', 0))
+        diff = abs(cand_exp - signals['exp_years'])
+        exp_label = f'~{cand_exp:.0f} yrs exp'
+        if diff <= 1:
+            score += 15
+            matched.append(exp_label)
+        elif diff <= 3:
+            score += 8
+            matched.append(exp_label)
+        elif diff <= 5:
+            score += 3
+
+    # Tiebreaker: existing match_score (0–10 pts)
+    score += int(candidate.get('match_score', 0) * 0.1)
+
+    return score, matched
+
+
+@app.route('/api/v1/semantic-search', methods=['POST'])
+def semantic_search():
+    """Magic Search: rank candidate list by natural-language query relevance."""
+    data = request.get_json()
+    if not data or 'query' not in data or 'candidates' not in data:
+        return jsonify({'error': "Missing 'query' or 'candidates'"}), 400
+
+    query = data['query'].strip()
+    candidates_list = data['candidates']
+
+    if not query:
+        return jsonify({'results': candidates_list, 'signals': {}}), 200
+
+    signals = parse_magic_query(query)
+
+    scored = []
+    for cand in candidates_list:
+        rel_score, matched_signals = score_relevance(cand, signals)
+        scored.append({**cand, 'relevance_score': rel_score, 'matched_signals': matched_signals})
+
+    scored.sort(key=lambda c: (c['relevance_score'], c.get('match_score', 0)), reverse=True)
+
+    return jsonify({'results': scored, 'signals': signals, 'total': len(scored)})
+
+
 def extract_text_from_file(file_path):
     ext = os.path.splitext(file_path)[1].lower()
     text = ""

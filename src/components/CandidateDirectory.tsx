@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { 
   Search, SlidersHorizontal, Table, LayoutDashboard, User, Mail, 
-  Phone, Briefcase, Award, X, Trash2, Shield, FileUp, Users, Download
+  Phone, Briefcase, Award, X, Trash2, Shield, FileUp, Users, Download,
+  Sparkles, Loader2, Zap
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Candidate, HiringStage, TargetDomain, Requisition } from '../types';
@@ -36,6 +37,14 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
   const [minScore, setMinScore] = useState(0);
   const [maxScore, setMaxScore] = useState(100);
 
+  // Magic Search state
+  const [searchMode, setSearchMode] = useState<'quick' | 'magic'>('quick');
+  const [magicQuery, setMagicQuery] = useState('');
+  const [magicLoading, setMagicLoading] = useState(false);
+  const [magicResults, setMagicResults] = useState<(Candidate & { relevance_score?: number; matched_signals?: string[] })[]>([]);
+  const [magicSignals, setMagicSignals] = useState<{ skills?: string[]; domains?: string[]; specs?: string[]; exp_years?: number | null } | null>(null);
+  const magicDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Toggle Filters
   const handleDomainFilter = (domain: TargetDomain) => {
     setSelectedDomains(prev => 
@@ -56,16 +65,68 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
     setSelectedSpecs([]);
     setMinScore(0);
     setMaxScore(100);
+    setMagicQuery('');
+    setMagicResults([]);
+    setMagicSignals(null);
   };
 
-  // Filtering Logic
-  const filteredCandidates = candidates.filter(candidate => {
-    // 1. Search Query Match
-    const matchSearch = 
+  // Magic Search — debounced call to backend
+  const runMagicSearch = useCallback((query: string) => {
+    if (magicDebounce.current) clearTimeout(magicDebounce.current);
+    if (!query.trim()) {
+      setMagicResults([]);
+      setMagicSignals(null);
+      setMagicLoading(false);
+      return;
+    }
+    setMagicLoading(true);
+    magicDebounce.current = setTimeout(async () => {
+      try {
+        const resp = await fetch('http://localhost:5000/api/v1/semantic-search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query, candidates })
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          setMagicResults(data.results || []);
+          setMagicSignals(data.signals || null);
+        }
+      } catch {
+        // fallback: keep showing all candidates
+        setMagicResults([]);
+      } finally {
+        setMagicLoading(false);
+      }
+    }, 500);
+  }, [candidates]);
+
+  const handleMagicQueryChange = (q: string) => {
+    setMagicQuery(q);
+    runMagicSearch(q);
+  };
+
+  const switchMode = (mode: 'quick' | 'magic') => {
+    setSearchMode(mode);
+    if (mode === 'quick') { setMagicQuery(''); setMagicResults([]); setMagicSignals(null); }
+    if (mode === 'magic') { setSearchQuery(''); }
+  };
+
+  // Filtering Logic — uses magic-ranked list when in magic mode
+  const baseList = searchMode === 'magic' && magicResults.length > 0
+    ? magicResults
+    : searchMode === 'magic' && magicQuery.trim() && !magicLoading
+      ? [] // query entered but no results
+      : candidates;
+
+  const filteredCandidates = baseList.filter(candidate => {
+    // 1. Quick-filter search query (only in quick mode)
+    const matchSearch = searchMode === 'magic' || (
       candidate.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       candidate.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
       candidate.skills_matrix.some(s => s.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      candidate.industry_remarks.toLowerCase().includes(searchQuery.toLowerCase());
+      candidate.industry_remarks.toLowerCase().includes(searchQuery.toLowerCase())
+    );
 
     // 2. Domain Match
     const matchDomain = selectedDomains.length === 0 || selectedDomains.some(d => {
@@ -209,22 +270,84 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
             </button>
           </div>
 
-          {/* 1. Boolean Search */}
+          {/* 1. Search Mode Toggle + Search Bar */}
           <div className="mb-8">
-            <span className="faceted-section-title">
-              Boolean Keyword Search
-            </span>
-            <div className="relative">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4.5 w-4.5 text-[var(--text-muted)]" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                placeholder="e.g. React OR Oil"
-                className="w-full bg-black/[0.015] border border-[var(--border-light)] rounded-[var(--radius-md)] pr-4 py-3 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--primary)]"
-                style={{ paddingLeft: '44px' }}
-              />
+            {/* Mode pill switcher */}
+            <div className="flex items-center gap-1 p-1 bg-black/[0.04] rounded-[var(--radius-md)] mb-3 border border-[var(--border-light)]">
+              <button
+                onClick={() => switchMode('quick')}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-[var(--radius-sm)] text-xs font-bold transition-all cursor-pointer ${
+                  searchMode === 'quick'
+                    ? 'bg-white shadow text-[var(--text-primary)] border border-[var(--border-light)]'
+                    : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
+                }`}
+              >
+                <Search className="h-3.5 w-3.5" /> Quick Filter
+              </button>
+              <button
+                onClick={() => switchMode('magic')}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-[var(--radius-sm)] text-xs font-bold transition-all cursor-pointer ${
+                  searchMode === 'magic'
+                    ? 'bg-[var(--primary)] shadow text-white'
+                    : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
+                }`}
+              >
+                <Sparkles className="h-3.5 w-3.5" /> Magic Search
+              </button>
             </div>
+
+            {searchMode === 'quick' ? (
+              <div className="relative">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4.5 w-4.5 text-[var(--text-muted)]" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  placeholder="e.g. React OR Oil"
+                  className="w-full bg-black/[0.015] border border-[var(--border-light)] rounded-[var(--radius-md)] pr-4 py-3 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--primary)]"
+                  style={{ paddingLeft: '44px' }}
+                />
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <div className="relative">
+                  {magicLoading
+                    ? <Loader2 className="absolute left-4 top-1/2 -translate-y-1/2 h-4.5 w-4.5 text-[var(--primary)] animate-spin" />
+                    : <Sparkles className="absolute left-4 top-1/2 -translate-y-1/2 h-4.5 w-4.5 text-[var(--primary)]" />
+                  }
+                  <input
+                    type="text"
+                    value={magicQuery}
+                    onChange={e => handleMagicQueryChange(e.target.value)}
+                    placeholder="Describe your ideal candidate…"
+                    className="w-full bg-[var(--primary)]/5 border border-[var(--primary)]/30 rounded-[var(--radius-md)] pr-4 py-3 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--primary)] placeholder:text-[var(--primary)]/50"
+                    style={{ paddingLeft: '44px' }}
+                  />
+                </div>
+                {/* Detected signals */}
+                {magicSignals && magicQuery.trim() && (
+                  <div className="flex flex-wrap gap-1 px-1">
+                    {(magicSignals.skills || []).map(s => (
+                      <span key={s} className="text-[10px] px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200 font-semibold">{s}</span>
+                    ))}
+                    {(magicSignals.domains || []).map(d => (
+                      <span key={d} className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--primary-glow)] text-[var(--primary)] border border-[var(--primary)]/20 font-semibold">{d}</span>
+                    ))}
+                    {(magicSignals.specs || []).map(s => (
+                      <span key={s} className="text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 font-semibold">{s}</span>
+                    ))}
+                    {magicSignals.exp_years != null && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold">{magicSignals.exp_years}+ yrs</span>
+                    )}
+                  </div>
+                )}
+                {magicQuery.trim() && !magicLoading && (
+                  <p className="text-[11px] text-[var(--text-muted)] px-1">
+                    {magicResults.length > 0 ? `${magicResults.length} candidates ranked by relevance` : 'No matches found — try different keywords'}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           {/* 2. Target Domain Checkboxes */}
@@ -335,6 +458,20 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                       </span>
                     </div>
 
+                    {/* Magic Search relevance badge */}
+                    {searchMode === 'magic' && (candidate as any).relevance_score !== undefined && (
+                      <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+                        <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-[var(--primary)] text-white">
+                          <Zap className="h-3 w-3" />
+                          {(candidate as any).relevance_score}pts relevance
+                        </span>
+                        {((candidate as any).matched_signals || []).map((sig: string) => (
+                          <span key={sig} className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--primary-glow)] text-[var(--primary)] border border-[var(--primary)]/20 font-semibold">
+                            {sig}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     {/* Industry Remarks Summary */}
                     <p className="candidate-card-remarks line-clamp-3">
                       {candidate.industry_remarks}
