@@ -21,7 +21,7 @@ const SEED_REQUISITIONS: Requisition[] = [
   },
   {
     id: 102,
-    job_title: 'Process Engineer â€” Petrochemical Plant',
+    job_title: 'Process Engineer — Petrochemical Plant',
     location: 'Jubail, Saudi Arabia',
     target_domain: 'Petrochemical',
     job_description_text: 'Seeking a process engineer with expertise in distillation operations, catalyst management, feedstock handling, chemical process optimization, and plant safety. HAZOP experience is a strong advantage.',
@@ -37,7 +37,7 @@ const SEED_REQUISITIONS: Requisition[] = [
   },
   {
     id: 104,
-    job_title: 'Marine Engineer â€” Vessel Operations',
+    job_title: 'Marine Engineer — Vessel Operations',
     location: 'Abu Dhabi, UAE',
     target_domain: 'Maritime & Shipping',
     job_description_text: 'Recruiting a qualified marine engineer for vessel operations and maintenance. STCW certification required. Experience in cargo handling, port logistics, and maritime safety compliance is essential.',
@@ -248,7 +248,7 @@ function App() {
       <aside className="sidebar">
         <div className="logo-container">
           <div className="logo select-none">
-            <span className="logo-icon">âš¡</span>
+            <span className="logo-icon">⚡</span>
             Hirengine AI
           </div>
         </div>
@@ -416,7 +416,7 @@ function App() {
                       <div className="stat-value">{avgScore}%</div>
                       <div className="stat-footer">
                         <span className="font-bold" style={{ color: avgScore >= 75 ? 'var(--success)' : 'var(--warning)' }}>
-                          {avgScore >= 75 ? 'âœ“ Above threshold' : 'â†“ Below 75% target'}
+                          {avgScore >= 75 ? '✓ Above threshold' : '↓ Below 75% target'}
                         </span>
                       </div>
                     </div>
@@ -532,9 +532,9 @@ function App() {
                       <h3 className="card-title mb-4">Match Score Distribution</h3>
                       <div className="flex flex-col gap-3">
                         {[
-                          { label: 'High Match (80â€“100)', count: activeCandidates.filter(c => c.match_score >= 80).length, color: 'bg-emerald-500' },
-                          { label: 'Mid Match (50â€“79)', count: activeCandidates.filter(c => c.match_score >= 50 && c.match_score < 80).length, color: 'bg-amber-500' },
-                          { label: 'Low Match (0â€“49)', count: activeCandidates.filter(c => c.match_score < 50).length, color: 'bg-rose-400' },
+                          { label: 'High Match (80-100)', count: activeCandidates.filter(c => c.match_score >= 80).length, color: 'bg-emerald-500' },
+                          { label: 'Mid Match (50-79)', count: activeCandidates.filter(c => c.match_score >= 50 && c.match_score < 80).length, color: 'bg-amber-500' },
+                          { label: 'Low Match (0-49)', count: activeCandidates.filter(c => c.match_score < 50).length, color: 'bg-rose-400' },
                         ].map(({ label, count, color }) => {
                           const pct = totalCVs > 0 ? Math.round((count / totalCVs) * 100) : 0;
                           return (
@@ -738,7 +738,7 @@ function App() {
                             </div>
                             <div className="flex items-center gap-4 text-xs text-[var(--text-secondary)]">
                               <span className="flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-[var(--primary)]" /> {req.location}</span>
-                              <span className="text-slate-400">â€¢</span>
+                              <span className="text-slate-400">•</span>
                               <span>Added {new Date(req.created_at).toLocaleDateString()}</span>
                             </div>
                             <p className="text-sm text-[var(--text-secondary)] leading-relaxed max-w-[520px] mt-0.5 line-clamp-2">
@@ -762,7 +762,7 @@ function App() {
                                   : 'bg-black/5 text-[var(--text-primary)] border border-black/10 hover:border-black/20 hover:bg-black/10'
                               }`}
                             >
-                              {activeReqId === req.id ? 'âœ“ Active' : 'Set Active'}
+                              {activeReqId === req.id ? '✓ Active' : 'Set Active'}
                             </button>
                             <button
                               onClick={() => {

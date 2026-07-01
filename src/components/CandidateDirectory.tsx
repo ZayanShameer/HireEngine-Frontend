@@ -351,7 +351,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                     type="text"
                     value={magicQuery}
                     onChange={e => handleMagicQueryChange(e.target.value)}
-                    placeholder="Describe your ideal candidateâ€¦"
+                    placeholder="Describe your ideal candidate..."
                     className="w-full bg-[var(--primary)]/5 border border-[var(--primary)]/30 rounded-[var(--radius-md)] pr-4 py-3 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--primary)] placeholder:text-[var(--primary)]/50"
                     style={{ paddingLeft: '44px' }}
                   />
@@ -375,7 +375,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                 )}
                 {magicQuery.trim() && !magicLoading && (
                   <p className="text-[11px] text-[var(--text-muted)] px-1">
-                    {magicResults.length > 0 ? `${magicResults.length} candidates ranked by relevance` : 'No matches found â€” try different keywords'}
+                    {magicResults.length > 0 ? `${magicResults.length} candidates ranked by relevance` : 'No matches found — try different keywords'}
                   </p>
                 )}
               </div>
@@ -530,7 +530,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                     <div className="candidate-card-footer">
                       <div className="flex items-center gap-2">
                         <span className="text-[var(--text-muted)]">Added {new Date(candidate.created_at).toLocaleDateString()}</span>
-                        <span className="text-slate-700 font-bold">â€¢</span>
+                        <span className="text-slate-700 font-bold">•</span>
                         <span className={`status-pill text-[10px] px-2 py-0.5 rounded-full font-bold tracking-wider ${getStageColorClass(candidate.current_stage)}`}>
                           {candidate.current_stage}
                         </span>
