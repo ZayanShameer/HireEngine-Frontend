@@ -81,16 +81,34 @@ function App() {
 
   // Persisted upload queue â€” in-flight items are reset to 'failed' on reload
   const [queue, setQueue] = useLocalStorage<import('./types').QueueItem[]>('hireengine_queue', []);
-  // Reset any stuck in-progress items from a previous session
+  // Reset any stuck in-progress items from a previous session and scrub stale malformed records
   const queueInitialized = React.useRef(false);
   React.useEffect(() => {
     if (!queueInitialized.current) {
       queueInitialized.current = true;
-      setQueue(prev => prev.map(item =>
-        ['pending', 'extracting', 'scoring'].includes(item.status)
-          ? { ...item, status: 'failed' as const, error: 'Interrupted by page refresh' }
-          : item
-      ));
+      // Generic section-header strings that the old name parser incorrectly captured
+      const GARBLED_NAMES = new Set([
+        'PERSONAL DETAILS', 'PERSONAL INFORMATION', 'PROFESSIONAL SUMMARY', 'CAREER SUMMARY',
+        'ELECTRICAL ENGINEER', 'MECHANICAL ENGINEER', 'CIVIL ENGINEER', 'PROCESS ENGINEER',
+        'PROFESSIONAL PROFILE', 'CURRICULUM VITAE', 'CONTACT DETAILS', 'ABOUT ME',
+        'CAREER OBJECTIVE', 'OBJECTIVE', 'SUMMARY', 'PROFILE', 'INTRODUCTION',
+        'FULL NAME', 'NAME', 'CANDIDATE', 'APPLICANT',
+      ]);
+      setQueue(prev => prev
+        .filter(item => {
+          // Drop stale completed items whose name is a garbled CV section header
+          if (item.status === 'completed' && item.parsedData?.full_name) {
+            const n = item.parsedData.full_name.trim().toUpperCase();
+            if (GARBLED_NAMES.has(n)) return false;
+          }
+          return true;
+        })
+        .map(item =>
+          ['pending', 'extracting', 'scoring'].includes(item.status)
+            ? { ...item, status: 'failed' as const, error: 'Interrupted by page refresh' }
+            : item
+        )
+      );
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -121,28 +139,29 @@ function App() {
   // Requisition form state
   const [newTitle, setNewTitle] = useState('');
   const [newLocation, setNewLocation] = useState('');
-  const [newDomain, setNewDomain] = useState<TargetDomain>('Oil & Gas');
+  const [newDomain, setNewDomain] = useState<TargetDomain | ''>('');
   const [newDesc, setNewDesc] = useState('');
 
   const handleCreateRequisition = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTitle || !newLocation || !newDesc) {
-      addToast('Please fill out all fields.', 'error');
+    if (!newTitle.trim() || !newDesc.trim()) {
+      addToast('Please provide a Job Title and Job Description.', 'error');
       return;
     }
     const newReq: Requisition = {
       id: Math.floor(Math.random() * 10000) + 200,
-      job_title: newTitle,
-      location: newLocation,
-      target_domain: newDomain,
-      job_description_text: newDesc,
+      job_title: newTitle.trim(),
+      location: newLocation.trim() || 'Not specified',
+      target_domain: (newDomain as TargetDomain) || 'Engineering Services',
+      job_description_text: newDesc.trim(),
       created_at: new Date().toISOString()
     };
     setRequisitions(prev => [newReq, ...prev]);
     setActiveReqId(newReq.id);
-    addToast(`Job requisition "${newTitle}" created & set as active.`, 'success');
+    addToast(`Job requisition "${newTitle.trim()}" created & set as active.`, 'success');
     setNewTitle('');
     setNewLocation('');
+    setNewDomain('');
     setNewDesc('');
   };
 
@@ -644,6 +663,7 @@ function App() {
                 <BulkUploadQueue 
                   activeRequisition={activeRequisition} 
                   onCandidatesParsed={handleCandidatesParsed}
+                  candidates={candidates}
                   queue={queue}
                   setQueue={setQueue}
                 />
@@ -681,17 +701,18 @@ function App() {
                     />
                   </div>
                   <div>
-                    <label className="form-label">Location</label>
+                    <label className="form-label">Location <span className="text-[var(--text-muted)] font-normal">(optional)</span></label>
                     <input
-                      type="text" required value={newLocation}
+                      type="text" value={newLocation}
                       onChange={e => setNewLocation(e.target.value)}
                       placeholder="e.g. Houston, US"
                       className="form-input text-sm"
                     />
                   </div>
                   <div>
-                    <label className="form-label">Industry Domain</label>
+                    <label className="form-label">Industry Domain <span className="text-[var(--text-muted)] font-normal">(optional)</span></label>
                     <select value={newDomain} onChange={e => setNewDomain(e.target.value as any)} className="form-select text-sm">
+                      <option value="">Auto-detect from Job Description</option>
                       <option value="Oil & Gas">Oil & Gas</option>
                       <option value="Petrochemical">Petrochemical</option>
                       <option value="Construction & Infrastructure">Construction & Infrastructure</option>
@@ -706,11 +727,11 @@ function App() {
                     </select>
                   </div>
                   <div>
-                    <label className="form-label">Job Description</label>
+                    <label className="form-label">Job Description <span className="text-[var(--primary)] font-semibold text-[10px]">(primary matching signal)</span></label>
                     <textarea
-                      required rows={5} value={newDesc}
+                      required rows={6} value={newDesc}
                       onChange={e => setNewDesc(e.target.value)}
-                      placeholder="Specify required experience and domain keywords..."
+                      placeholder="Paste the full job description here. Candidate match scores are calculated primarily by aligning CV content against these keywords and requirements..."
                       className="form-textarea text-sm"
                     />
                   </div>

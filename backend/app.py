@@ -301,26 +301,27 @@ ADJACENT_DOMAIN_MAP = {
     'Maritime & Shipping':        {'Engineering Services', 'Oil & Gas'},
 }
 
-def score_candidate_data(candidate_text, target_domain, file_hint=''):
-    """Screen a candidate CV against a target domain.
-    
+def score_candidate_data(candidate_text, target_domain='', file_hint='', jd_text=''):
+    """Screen a candidate CV against a job description and/or target domain.
+
     Parameters
     ----------
     candidate_text : str   Raw text extracted from the CV file.
-    target_domain  : str   The hiring domain selected by the recruiter.
+    target_domain  : str   The hiring domain (optional — auto-detected when blank).
     file_hint      : str   Original uploaded filename used as name-parsing fallback.
+    jd_text        : str   Full job description text (primary matching signal when provided).
     """
     # Extract candidate metadata
     full_name, email, phone = extract_contacts(candidate_text, file_hint=file_hint)
     total_exp = parse_experience_years(candidate_text)
-    
+
     # Identify skills present in resume
     skills_matrix = []
     text_upper = candidate_text.upper()
     for skill in SKILLS_POOL:
         if skill in text_upper:
             skills_matrix.append(skill)
-            
+
     # Extract specialization tags
     specialization_tags = []
     for spec in SPECIALIZATION_POOL:
@@ -341,75 +342,99 @@ def score_candidate_data(candidate_text, target_domain, file_hint=''):
     candidate_domain = max(domain_scores, key=domain_scores.get)
     max_count = domain_scores[candidate_domain]
 
-    # Determine match tier
-    is_exact_match   = (candidate_domain == target_domain)
-    adjacent_domains = ADJACENT_DOMAIN_MAP.get(target_domain, set())
-    is_adjacent_match = (not is_exact_match) and (candidate_domain in adjacent_domains)
-
-    # ── Matching Logic ────────────────────────────────────────────────────────
-    relevant_exp = total_exp
-    match_score  = 50  # default base
-
-    if is_exact_match or max_count < 2:
-        # ── TIER 1: Exact domain match (or too few keywords to penalise) ──
-        skill_factor = min(40, len(skills_matrix) * 8)
-        exp_factor   = min(40, total_exp * 5)        # 5 pts/yr, caps at 40
-        spec_factor  = min(20, len(specialization_tags) * 10)
-        match_score  = int(skill_factor + exp_factor + spec_factor)
-        match_score  = max(10, min(100, match_score))
-
-        if skills_matrix:
-            remarks = (
-                f"Strong Domain Match. Candidate possesses {relevant_exp:.1f} years of experience "
-                f"in {target_domain} with matching industry-specific skills "
-                f"({', '.join(skills_matrix[:4])})."
-            )
+    # Auto-detect target domain from JD or CV if not explicitly set
+    if not target_domain:
+        if jd_text:
+            jd_lower = jd_text.lower()
+            jd_domain_scores = {}
+            for domain, keywords in DOMAIN_TAXONOMY.items():
+                count = sum(len(re.findall(rf'\b{re.escape(kw)}\b', jd_lower)) for kw in keywords)
+                jd_domain_scores[domain] = count
+            target_domain = max(jd_domain_scores, key=jd_domain_scores.get)
         else:
-            remarks = (
-                f"Domain Match. Candidate has {relevant_exp:.1f} years of experience in "
-                f"{target_domain}. No specific skills detected from CV text."
-            )
+            target_domain = candidate_domain  # fall back to CV-detected domain
 
-    elif is_adjacent_match:
-        # ── TIER 2: Adjacent / closely related heavy-industry domain ──
-        # These candidates bring transferable technical skills (commissioning,
-        # instrumentation, maintenance) that are highly relevant even though
-        # the sector label differs.
-        skill_factor   = min(35, len(skills_matrix) * 7)
-        exp_factor     = min(30, total_exp * 4)      # still rewards experience
-        spec_factor    = min(15, len(specialization_tags) * 8)
-        adjacency_base = 20                           # partial-match base credit
-        match_score    = int(adjacency_base + skill_factor + exp_factor + spec_factor)
-        match_score    = max(42, min(80, match_score))  # floor 42%, ceiling 80%
+    # ── JD Keyword Matching (primary signal when JD provided) ────────────────
+    jd_match_score = 0
+    jd_matched_keywords = []
+    jd_keywords = []
 
-        # Relevant exp: credit 60% of total for adjacent domain
-        relevant_exp   = round(total_exp * 0.60, 1)
+    if jd_text:
+        jd_lower = jd_text.lower()
+        cv_lower = candidate_text.lower()
 
+        # Extract all meaningful words from JD (4+ chars, not stopwords)
+        stopwords = {'with', 'have', 'that', 'this', 'from', 'will', 'must', 'shall',
+                     'should', 'would', 'their', 'been', 'able', 'work', 'team',
+                     'strong', 'good', 'role', 'also', 'well', 'based', 'more'}
+        raw_words = re.findall(r'\b[a-z][a-z0-9/&+\-]{3,}\b', jd_lower)
+        jd_keywords = list(dict.fromkeys([w for w in raw_words if w not in stopwords]))  # deduplicated
+
+        # Score each JD keyword found in CV (weighted by word length as proxy for specificity)
+        total_weight = 0
+        matched_weight = 0
+        for kw in jd_keywords[:120]:  # cap at 120 most-frequent JD terms
+            weight = min(3.0, 1.0 + len(kw) * 0.1)  # longer/specific terms worth more
+            total_weight += weight
+            if re.search(rf'\b{re.escape(kw)}\b', cv_lower):
+                matched_weight += weight
+                jd_matched_keywords.append(kw)
+
+        # JD score: up to 60 points based on keyword coverage
+        jd_match_score = int((matched_weight / total_weight) * 60) if total_weight > 0 else 0
+
+    # ── Base score factors (skills, experience, specialization) ──────────────
+    skill_factor = min(25, len(skills_matrix) * 5)
+    exp_factor   = min(25, total_exp * 3)
+    spec_factor  = min(10, len(specialization_tags) * 5)
+
+    # ── Final Match Score ────────────────────────────────────────────────────
+    relevant_exp = total_exp
+
+    if jd_text and jd_keywords:
+        # JD-based scoring: JD keyword match is the primary signal (60%), skills/exp/spec top it up (40%)
+        match_score = jd_match_score + skill_factor + exp_factor + spec_factor
+        match_score = max(10, min(100, match_score))
+
+        jd_coverage = round((len(jd_matched_keywords) / max(1, len(jd_keywords[:120]))) * 100, 1)
         remarks = (
-            f"Adjacent Domain Match. Candidate has {total_exp:.1f} years of experience in "
-            f"{candidate_domain}, which shares substantial technical overlap with {target_domain} "
-            f"(commissioning, instrumentation, maintenance engineering). "
-            f"Estimated {relevant_exp:.1f} years of transferable relevant experience. "
-            f"Matched skills: {', '.join(skills_matrix[:4]) if skills_matrix else 'General Technical'}."
+            f"JD Match: {jd_coverage}% of job description keywords found in CV "
+            f"({len(jd_matched_keywords)} of {min(len(jd_keywords), 120)} terms). "
+            f"Detected domain: {target_domain}. "
+            f"Experience: {total_exp:.1f} years. "
+            f"Matched CV skills: {', '.join(skills_matrix[:5]) if skills_matrix else 'General Technical'}."
         )
 
     else:
-        # ── TIER 3: True domain mismatch (e.g. Hospitality vs Oil & Gas) ──
-        # Apply a meaningful penalty, but still credit strong total experience
-        # with a floor so scores don't irrationally plunge below ~38%.
-        exp_floor     = min(18, total_exp * 2.0)    # up to 18 pts from raw exp
-        skill_bonus   = min(10, len(skills_matrix) * 2)  # small transferable bonus
-        mismatch_base = 20
-        match_score   = int(mismatch_base + exp_floor + skill_bonus)
-        match_score   = max(20, min(48, match_score))  # hard cap 20–48%
+        # Domain-taxonomy fallback when no JD supplied
+        adjacent_domains = ADJACENT_DOMAIN_MAP.get(target_domain, set())
+        is_exact_match    = (candidate_domain == target_domain)
+        is_adjacent_match = (not is_exact_match) and (candidate_domain in adjacent_domains)
 
-        relevant_exp  = round(total_exp * 0.15, 1)
-
-        remarks = (
-            f"Domain Mismatch. Candidate has {total_exp:.1f} years of experience, but their "
-            f"background is concentrated in {candidate_domain} (keyword density: {max_count}). "
-            f"This does not align well with the required {target_domain} domain expertise."
-        )
+        if is_exact_match or max_count < 2:
+            match_score = int(skill_factor * 1.6 + exp_factor * 1.6 + spec_factor * 2)
+            match_score = max(10, min(100, match_score))
+            remarks = (
+                f"Domain Match ({target_domain}). {total_exp:.1f} yrs experience. "
+                f"Skills: {', '.join(skills_matrix[:4]) if skills_matrix else 'General Technical'}."
+            )
+        elif is_adjacent_match:
+            relevant_exp = round(total_exp * 0.60, 1)
+            match_score  = int(20 + skill_factor * 1.4 + exp_factor * 1.2 + spec_factor * 1.5)
+            match_score  = max(42, min(80, match_score))
+            remarks = (
+                f"Adjacent Domain ({candidate_domain} → {target_domain}). "
+                f"{relevant_exp:.1f} yrs transferable experience. "
+                f"Skills: {', '.join(skills_matrix[:4]) if skills_matrix else 'General Technical'}."
+            )
+        else:
+            relevant_exp = round(total_exp * 0.15, 1)
+            match_score  = int(20 + min(18, total_exp * 2) + min(10, len(skills_matrix) * 2))
+            match_score  = max(20, min(48, match_score))
+            remarks = (
+                f"Domain Mismatch. CV focused on {candidate_domain} "
+                f"vs required {target_domain}. {total_exp:.1f} yrs total experience."
+            )
 
     return {
         "full_name": full_name,
@@ -426,14 +451,15 @@ def score_candidate_data(candidate_text, target_domain, file_hint=''):
 @app.route('/api/v1/screen-candidate', methods=['POST'])
 def screen_candidate():
     data = request.get_json()
-    if not data or 'candidate_text' not in data or 'target_domain' not in data:
-        return jsonify({"error": "Missing parameters 'candidate_text' or 'target_domain'"}), 400
-        
+    if not data or 'candidate_text' not in data:
+        return jsonify({"error": "Missing parameter 'candidate_text'"}), 400
+
     candidate_text = data['candidate_text']
-    target_domain  = data['target_domain']
-    file_hint      = data.get('file_hint', '')   # optional filename fallback for name parsing
-    
-    response_payload = score_candidate_data(candidate_text, target_domain, file_hint=file_hint)
+    target_domain  = data.get('target_domain', '')   # now optional
+    jd_text        = data.get('job_description_text', '')
+    file_hint      = data.get('file_hint', '')
+
+    response_payload = score_candidate_data(candidate_text, target_domain, file_hint=file_hint, jd_text=jd_text)
     return jsonify(response_payload)
 
 
@@ -1049,8 +1075,9 @@ def upload_cv():
     # Extract text from the saved file
     raw_text = extract_text_from_file(save_path)
 
-    # Run AI screening, passing the original filename as a name-parsing hint
-    scored = score_candidate_data(raw_text, target_domain, file_hint=file.filename)
+    # Run AI screening with JD as primary signal
+    jd_text = request.form.get('job_description_text', '')
+    scored = score_candidate_data(raw_text, target_domain, file_hint=file.filename, jd_text=jd_text)
     scored['cv_file_name'] = unique_name
 
     return jsonify(scored)

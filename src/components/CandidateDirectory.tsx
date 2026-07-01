@@ -402,10 +402,10 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
             </div>
           </div>
 
-          {/* 3. High-Voltage/Specialization Badges */}
+          {/* 3. Specialization Badges */}
           <div className="mb-8 border-t border-[var(--border-light)] pt-6">
             <span className="faceted-section-title">
-              High-Voltage / Specialization
+              Specialization
             </span>
             <div className="specialization-tags-grid">
               {SPECIALIZATIONS.map(spec => {
@@ -785,7 +785,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
               {selectedCandidate.specialization_tags.length > 0 && (
                 <div className="flex flex-col gap-3">
                   <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                    High-Voltage Specialization
+                    Specialization
                   </h4>
                   <div className="flex flex-wrap gap-2">
                     {selectedCandidate.specialization_tags.map((tag, i) => (

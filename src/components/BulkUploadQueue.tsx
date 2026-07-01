@@ -6,6 +6,7 @@ import { QueueItem, Requisition, Candidate, TargetDomain } from '../types';
 interface BulkUploadQueueProps {
   activeRequisition: Requisition | null;
   onCandidatesParsed: (candidates: Candidate[]) => void;
+  candidates: Candidate[];
   queue: QueueItem[];
   setQueue: React.Dispatch<React.SetStateAction<QueueItem[]>>;
 }
@@ -24,9 +25,37 @@ const BLANK_MANUAL = {
 export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
   activeRequisition,
   onCandidatesParsed,
+  candidates,
   queue,
   setQueue
 }) => {
+  // Lookup order: 1) ID match  2) name+requisition match  3) stale parsedData fallback
+  const findLiveCandidate = (parsedData: Partial<Candidate> | undefined): Candidate | undefined => {
+    if (!parsedData) return undefined;
+    // Strategy 1: exact ID match (freshly uploaded items)
+    if (parsedData.id) {
+      const byId = candidates.find(c => c.id === parsedData.id);
+      if (byId) return byId;
+    }
+    // Strategy 2: name + requisition match (stale localStorage items where ID drifted)
+    if (parsedData.full_name && parsedData.requisition_id) {
+      const byName = candidates.find(c =>
+        c.requisition_id === parsedData.requisition_id &&
+        c.full_name?.trim().toLowerCase() === parsedData.full_name?.trim().toLowerCase()
+      );
+      if (byName) return byName;
+    }
+    return undefined;
+  };
+  const getLiveScore = (parsedData: Partial<Candidate> | undefined): number => {
+    const live = findLiveCandidate(parsedData);
+    return live?.match_score ?? parsedData?.match_score ?? 0;
+  };
+  const getLiveData = (parsedData: Partial<Candidate> | undefined): Partial<Candidate> => {
+    if (!parsedData) return {};
+    const live = findLiveCandidate(parsedData);
+    return live ? { ...parsedData, ...live } : parsedData;
+  };
   // queue & setQueue are lifted to App.tsx for localStorage persistence
   const [isDragActive, setIsDragActive] = useState(false);
   const [showManualForm, setShowManualForm] = useState(false);
@@ -248,7 +277,8 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
       try {
         const formData = new FormData();
         formData.append('file', file);
-        formData.append('target_domain', activeRequisition!.target_domain);
+        formData.append('target_domain', activeRequisition!.target_domain || '');
+        formData.append('job_description_text', activeRequisition!.job_description_text || '');
         formData.append('requisition_id', String(activeRequisition!.id));
 
         updateProgress(40, 'extracting');
@@ -292,7 +322,11 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
           const response = await fetch('http://localhost:5000/api/v1/screen-candidate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ candidate_text: rawText, target_domain: activeRequisition!.target_domain })
+            body: JSON.stringify({
+              candidate_text: rawText,
+              target_domain: activeRequisition!.target_domain || '',
+              job_description_text: activeRequisition!.job_description_text || ''
+            })
           });
           if (response.ok) {
             const resJson = await response.json();
@@ -536,7 +570,7 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
   const cleanFileNameToName = (fileName: string): string => {
     let stem = fileName.replace(/\.[^/.]+$/, ''); // Strip extension
     // Strip common metadata postfixes
-    stem = stem.replace(/(?i)(_cv|_resume|_application|\d{4,}).*$/, '');
+    stem = stem.replace(/(_cv|_resume|_application|\d{4,}).*$/i, '');
     stem = stem.replace(/[_\-]+/g, ' ').trim();
     
     // Check if filename contains forbidden generic title keywords
@@ -600,10 +634,16 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
     const cleanText = text.toLowerCase();
     const domainTaxonomy: Record<TargetDomain, string[]> = {
       'Oil & Gas': ['petroleum', 'drilling', 'refinery', 'offshore', 'pipeline', 'hydrocarbon', 'gas', 'hse', 'reservoir', 'piping'],
-      'Railway': ['locomotive', 'rolling stock', 'signaling', 'track', 'rail', 'transit', 'metro', 'derailment', 'bogie'],
-      'Electrical/Testing': ['transformer', 'relay', 'switchgear', 'gis', 'voltage', 'scada', 'ct', 'vt', 'testing', 'substation'],
-      'Information Technology': ['react', 'typescript', 'javascript', 'python', 'flask', 'software', 'database', 'sql', 'git', 'backend'],
-      'Healthcare': ['clinical', 'nursing', 'medical', 'hospital', 'patient', 'health', 'surgeon', 'healthcare', 'diagnosis']
+      'Petrochemical': ['petrochemical', 'polymer', 'catalyst', 'distillation', 'chemical', 'olefins', 'aromatics', 'cracker'],
+      'Construction & Infrastructure': ['construction', 'civil', 'infrastructure', 'excavation', 'structural', 'concrete', 'building', 'highway'],
+      'Energy': ['solar', 'wind', 'renewable', 'energy', 'grid', 'battery', 'photovoltaic', 'substation', 'power'],
+      'Hospitality': ['hospitality', 'hotel', 'resort', 'guest', 'culinary', 'concierge', 'catering', 'food service', 'barista'],
+      'Facilities Management': ['facilities', 'maintenance', 'hvac', 'janitorial', 'property', 'asset management', 'building services'],
+      'Maritime & Shipping': ['maritime', 'vessel', 'marine', 'ship', 'cargo', 'navigation', 'offshore', 'port', 'dock'],
+      'Power Plants': ['turbine', 'boiler', 'generator', 'power plant', 'thermal', 'combined cycle', 'steam', 'generation'],
+      'Engineering Services': ['consulting', 'design', 'engineering', 'drafting', 'autocad', 'project management', 'technical'],
+      'Manufacturing': ['manufacturing', 'production', 'assembly', 'quality control', 'lean', 'six sigma', 'machining', 'factory'],
+      'EPC': ['epc', 'procurement', 'commissioning', 'turnkey', 'contractor', 'project execution', 'lump sum']
     };
 
     const specsPool = ['13.8KV', '380KV', '765KV', 'HSE Certified', 'Deepwater Drilling', 'ETAP', 'CBTC', 'PLC/SCADA'];
@@ -656,7 +696,7 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
       return acc;
     }, {} as Record<TargetDomain, number>);
 
-    let candidatePrimaryDomain: TargetDomain = 'Information Technology';
+    let candidatePrimaryDomain: TargetDomain = 'Engineering Services';
     let maxDensity = 0;
     Object.entries(domainCounts).forEach(([domain, count]) => {
       if (count > maxDensity) { maxDensity = count; candidatePrimaryDomain = domain as TargetDomain; }
@@ -959,9 +999,13 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
                         </div>
                         {/* Table rows */}
                         {completedItems.map(item => {
-                          const d = item.parsedData!;
-                          const score = d.match_score || 0;
+                          const d = getLiveData(item.parsedData);
+                          const score = getLiveScore(item.parsedData);
+                          const exp = d.total_experience_years || 0;
                           const isSelected = selectedItemId === item.id;
+                          
+                          // FIX: Check absolute eligibility using BOTH structural score parameters and 5y baseline constraints
+                          const isEligible = score >= 55 && exp >= 5;
                           return (
                             <button
                               key={item.id}
@@ -1003,8 +1047,9 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
 
                   {/* Right: detail panel for selected item */}
                   {selectedItem && selectedItem.parsedData && (() => {
-                    const d = selectedItem.parsedData!;
-                    const score = d.match_score || 0;
+                    const d = getLiveData(selectedItem.parsedData);
+                    const score = getLiveScore(selectedItem.parsedData);
+                    const isEligible = score >= 55 && (d.total_experience_years || 0) >= 5;
                     return (
                       <div className="flex-1 border border-[var(--border-light)] rounded-[var(--radius-md)] p-4 overflow-y-auto bg-black/[0.01] flex flex-col gap-3 animate-fade-in min-w-0">
                         {/* Header */}
@@ -1113,8 +1158,9 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
                           }`} style={{ width: `${item.progress}%` }} />
                         </div>
                         {item.status === 'completed' && item.parsedData && (() => {
-                          const d = item.parsedData;
-                          const score = d.match_score || 0;
+                          const d = getLiveData(item.parsedData);
+                          const score = getLiveScore(item.parsedData);
+                          const isEligible = score >= 55 && (d.total_experience_years || 0) >= 5;
                           return (
                             <div className="mt-3 pt-3 border-t border-[var(--border-light)] text-xs animate-fade-in flex flex-col gap-2.5">
                               <div className="flex items-center justify-between gap-2">
