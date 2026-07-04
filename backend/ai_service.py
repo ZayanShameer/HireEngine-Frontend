@@ -1,0 +1,118 @@
+import os
+import json
+import time
+import logging
+from dotenv import load_dotenv
+
+# Load environment variables from .env file if present
+load_dotenv()
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def analyze_candidate_with_ai(cv_text: str, jd_text: str, target_domain: str, algorithmic_score: int) -> dict | None:
+    """
+    Performs precision ATS CV parsing and semantic screening using Google Gemini API if GEMINI_API_KEY is available.
+    Executes name extraction, timeline experience tracking, contextual domain scoring, and structured intelligence extraction.
+    If API key is missing or an error occurs, returns None for graceful algorithmic fallback.
+    """
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key or api_key.strip() == "" or api_key.strip() == "YOUR_GEMINI_API_KEY_HERE":
+        logger.info("No valid GEMINI_API_KEY found in environment. Using standard algorithmic screening.")
+        return None
+
+    try:
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(api_key=api_key.strip())
+
+        # Truncate texts if extremely long to avoid unnecessary token bloat
+        cv_preview = cv_text[:14000] if cv_text else "No resume text available."
+        jd_preview = jd_text[:5000] if jd_text else f"General role in {target_domain} domain."
+
+        prompt = f"""You are an expert, production-grade ATS (Applicant Tracking System) CV parser and precision engineering recruiter. Your task is to ingest raw unstructured text from a candidate's resume, cleanly parse out profile parameters, and contextually score them against a provided target job domain and job description.
+
+Execute this extraction and matching logic strictly according to the rules below:
+
+### 1. NAME EXTRACTION RULES
+- Locate the candidate's absolute legal full name from the top header lines of the document text.
+- STRIP and IGNORE all trailing credentials, post-nominal titles, or certifications (e.g., "MBA", "PMP", "Ph.D", "SEC Approved", "P.E", "C.Eng").
+- STRIP and IGNORE prefix labels such as "NAME :", "Name:", "Full Name:", "Candidate Name:", "Applicant Name:", "Resume of:", "Curriculum Vitae of:", "CV of:", or "Application of:".
+- CRITICAL DELIMITER RULE: If a header or filename is formatted with a dash or pipe like "<Candidate Name> - <Job Title>" or "John Doe | Senior Pipeline Engineer", you MUST extract ONLY the person's name before the delimiter ("John Doe"). Never include job titles like "Engineer", "Manager", "Consultant", "Director", or "Specialist" in the full_name field.
+- BLOCKLIST CRITICAL ERROR: Under no circumstances use standard resume structural section headers (such as "PERSONAL DETAILS", "PROFESSIONAL SUMMARY", "CAREER SUMMARY", "RESUME", or "EDUCATION") as the candidate's name. If no explicit person's name is identifiable, fallback to "Unknown Candidate".
+
+### 2. EXPERIENCE TIMELINE TRACKING RULES
+- Do not blindly latch onto isolated generic number strings like "3 years of military service" or "1 year of training" to populate total experience.
+- You must mathematically compute the candidate's overall career span by evaluating the chronological sequence of their historical work timeline blocks from their first relevant role to the present year (2026).
+- Deduce "relevant_experience_years" based strictly on how many of those active working years were spent performing functions aligned with the provided Job Description.
+
+### 3. CONTEXTUAL SCORING RULES
+- Evaluate a match_score dynamically from 0 to 100.
+- Avoid naïve keyword counting flags. Understand deep technical semantics. For example: If a candidate mentions "Anode Furnaces" or "BMS strategies", recognize that contextually maps to Industrial Environments or Controls without needing a verbatim string match.
+- Ensure that if a candidate is a phenomenal expert in an unrelated sub-domain (e.g., a pure High-Voltage Substation engineer being evaluated for an Industrial Automation/PLC software role), their match score drops significantly to accurately reflect the functional profile pivot required.
+
+### 4. OUTPUT SCHEMA CONSTRAINTS
+Your response must be returned strictly as a clean, single, valid JSON object with no markdown code blocks, no backticks, and no trailing prose. Match this exact JSON typography:
+
+{{
+  "full_name": "String (Proper Casing, cleared of certifications/post-nominals)",
+  "email": "String",
+  "phone": "String",
+  "total_experience_years": Number (Float, mathematically calculated from history),
+  "relevant_experience_years": Number (Float, functionally mapped to the JD),
+  "match_score": Number (Integer from 0 to 100),
+  "skills_matrix": ["String (Cleaned uppercase tool/tech names found)"],
+  "specialization_tags": ["String (Protocol/Domain tags like 'IEC 61850', 'SCADA', 'Modbus')"],
+  "industry_remarks": "String (A concise 2-3 sentence overview detailing structural alignment, tool proficiencies, or critical domain/timeline experience gaps)"
+}}
+
+### 5. INPUT PARAMETERS
+Target Domain: {target_domain}
+Job Description: {jd_preview}
+
+Candidate Resume Raw Text:
+{cv_preview}
+"""
+
+        models_to_try = [
+            "gemini-2.5-flash-lite",
+            "gemini-flash-lite-latest",
+            "gemini-flash-latest",
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "gemini-3.5-flash"
+        ]
+        for model_name in models_to_try:
+            for attempt in range(2):
+                try:
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            temperature=0.1,
+                        ),
+                    )
+
+                    if response.text:
+                        result = json.loads(response.text)
+                        logger.info(f"Precision ATS AI Analysis completed successfully via {model_name}. Name: {result.get('full_name')}, Score: {result.get('match_score', algorithmic_score)}%")
+                        return result
+                    return None
+                except Exception as e:
+                    err_str = str(e)
+                    if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "quota" in err_str.lower():
+                        logger.warning(f"Google Gemini quota limit (429 on {model_name}, attempt {attempt+1}). Pausing 10s for quota refill...")
+                        time.sleep(10)
+                    elif "503" in err_str or "UNAVAILABLE" in err_str:
+                        logger.warning(f"Google Gemini server busy (503 on {model_name}, attempt {attempt+1}). Pausing 3s before retry/fallback...")
+                        time.sleep(3)
+                    else:
+                        logger.warning(f"Google Gemini model {model_name} (attempt {attempt+1}) error: {err_str[:50]}...")
+                        time.sleep(1)
+
+    except Exception as e:
+        logger.error(f"Error calling Google Gemini API during ATS screening: {str(e)}")
+        return None

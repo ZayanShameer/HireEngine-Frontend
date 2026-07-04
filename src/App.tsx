@@ -2,48 +2,16 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Building2, Users, FileUp, ClipboardList, BarChart3, Plus, 
   MapPin, Database, Layers, CheckCircle2, ArrowRight, Trash2,
-  AlertTriangle, TrendingUp, Clock, Target
+  AlertTriangle, TrendingUp, Clock, Target, LogOut, UserCog,
+  Key, Lock, X as XIcon, AlertCircle
 } from 'lucide-react';
 import { Requisition, Candidate, HiringStage, TargetDomain } from './types';
 import { BulkUploadQueue } from './components/BulkUploadQueue';
 import { CandidateDirectory } from './components/CandidateDirectory';
 import { ExcelExporter } from './components/ExcelExporter';
-
-// Seed Requisitions â€” shown on first launch; user can delete them
-const SEED_REQUISITIONS: Requisition[] = [
-  {
-    id: 101,
-    job_title: 'Petroleum Pipeline Engineer',
-    location: 'Riyadh, Saudi Arabia',
-    target_domain: 'Oil & Gas',
-    job_description_text: 'Looking for a Senior Pipeline Engineer with experience in petroleum pipelines, drilling simulation, gas reservoirs, refining operations, offshore wellhead setups, and hydrocarbon transport. HSE certifications required.',
-    created_at: new Date(Date.now() - 86400000 * 5).toISOString()
-  },
-  {
-    id: 102,
-    job_title: 'Process Engineer — Petrochemical Plant',
-    location: 'Jubail, Saudi Arabia',
-    target_domain: 'Petrochemical',
-    job_description_text: 'Seeking a process engineer with expertise in distillation operations, catalyst management, feedstock handling, chemical process optimization, and plant safety. HAZOP experience is a strong advantage.',
-    created_at: new Date(Date.now() - 86400000 * 4).toISOString()
-  },
-  {
-    id: 103,
-    job_title: 'MEP Site Engineer',
-    location: 'Dubai, UAE',
-    target_domain: 'Construction & Infrastructure',
-    job_description_text: 'Hiring an MEP site engineer for large-scale infrastructure projects. Must have experience in mechanical, electrical, and plumbing systems, site management, AutoCAD, and Primavera P6 scheduling.',
-    created_at: new Date(Date.now() - 86400000 * 3).toISOString()
-  },
-  {
-    id: 104,
-    job_title: 'Marine Engineer — Vessel Operations',
-    location: 'Abu Dhabi, UAE',
-    target_domain: 'Maritime & Shipping',
-    job_description_text: 'Recruiting a qualified marine engineer for vessel operations and maintenance. STCW certification required. Experience in cargo handling, port logistics, and maritime safety compliance is essential.',
-    created_at: new Date(Date.now() - 86400000 * 2).toISOString()
-  }
-];
+import { LoginPage } from './components/LoginPage';
+import { UserManagement } from './components/UserManagement';
+import { createApiFetch } from './lib/apiFetch';
 
 // localStorage persistence hook
 function useLocalStorage<T>(key: string, initialValue: T): [T, React.Dispatch<React.SetStateAction<T>>] {
@@ -72,12 +40,114 @@ function useLocalStorage<T>(key: string, initialValue: T): [T, React.Dispatch<Re
 const STAGES: HiringStage[] = ['Screening', 'Shortlist', 'Interviewing', 'Offered', 'Hired', 'Rejected'];
 
 function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'screener' | 'directory' | 'requisitions'>('dashboard');
+  // ── Authentication ───────────────────────────────────────────
+  const [authToken, setAuthToken] = useState<string | null>(() => localStorage.getItem('hireengine_token'));
+  const [authUser, setAuthUser] = useState<{ name: string; role: string; email: string } | null>(() => {
+    try { return JSON.parse(localStorage.getItem('hireengine_user') || 'null'); } catch { return null; }
+  });
 
-  // Persisted state
-  const [requisitions, setRequisitions] = useLocalStorage<Requisition[]>('hireengine_requisitions', SEED_REQUISITIONS);
-  const [candidates, setCandidates] = useLocalStorage<Candidate[]>('hireengine_candidates', []);
+  const handleLogin = (token: string, user: { name: string; role: string; email: string }) => {
+    localStorage.setItem('hireengine_token', token);
+    localStorage.setItem('hireengine_user', JSON.stringify(user));
+    setAuthToken(token);
+    setAuthUser(user);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('hireengine_token');
+    localStorage.removeItem('hireengine_user');
+    setAuthToken(null);
+    setAuthUser(null);
+  };
+
+  // Show login page if not authenticated
+  if (!authToken || !authUser) {
+    return <LoginPage onLogin={handleLogin} />;
+  }
+  // ─────────────────────────────────────────────────────────────
+
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'screener' | 'directory' | 'requisitions' | 'users'>('dashboard');
+
+  // Create authenticated apiFetch helper that auto-logs out on 401
+  const apiFetch = React.useMemo(() => {
+    return authToken ? createApiFetch(authToken, handleLogout) : null;
+  }, [authToken]);
+
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [oldPassword, setOldPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordSuccess, setPasswordSuccess] = useState('');
+  const [changingPassword, setChangingPassword] = useState(false);
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError('');
+    setPasswordSuccess('');
+    if (newPassword !== confirmPassword) {
+      setPasswordError('New passwords do not match.');
+      return;
+    }
+    if (newPassword.length < 6) {
+      setPasswordError('New password must be at least 6 characters.');
+      return;
+    }
+    if (!apiFetch) return;
+    setChangingPassword(true);
+    try {
+      const res = await apiFetch('http://localhost:5000/api/v1/auth/change-password', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ old_password: oldPassword, new_password: newPassword })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setPasswordError(data.error || 'Failed to change password.');
+      } else {
+        setPasswordSuccess('Password successfully updated!');
+        setOldPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+        setTimeout(() => {
+          setShowPasswordModal(false);
+          setPasswordSuccess('');
+        }, 1500);
+      }
+    } catch (err) {
+      setPasswordError('Network error while changing password.');
+    } finally {
+      setChangingPassword(false);
+    }
+  };
+
+  // Persisted UI state
   const [activeReqId, setActiveReqId] = useLocalStorage<number>('hireengine_active_req', 101);
+
+  // Backend database state
+  const [requisitions, setRequisitions] = useState<Requisition[]>([]);
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [dataLoading, setDataLoading] = useState(true);
+
+  // Fetch initial data from backend database
+  useEffect(() => {
+    if (!authToken) return;
+    setDataLoading(true);
+    Promise.all([
+      fetch('http://localhost:5000/api/v1/requisitions').then(res => res.json()),
+      fetch('http://localhost:5000/api/v1/candidates').then(res => res.json())
+    ])
+      .then(([reqData, candData]) => {
+        if (Array.isArray(reqData)) setRequisitions(reqData);
+        if (Array.isArray(candData)) setCandidates(candData);
+      })
+      .catch(() => {
+        console.error('Failed to load initial database state.');
+      })
+      .finally(() => {
+        setDataLoading(false);
+      });
+  }, [authToken]);
 
   // Persisted upload queue â€” in-flight items are reset to 'failed' on reload
   const [queue, setQueue] = useLocalStorage<import('./types').QueueItem[]>('hireengine_queue', []);
@@ -142,70 +212,108 @@ function App() {
   const [newDomain, setNewDomain] = useState<TargetDomain | ''>('');
   const [newDesc, setNewDesc] = useState('');
 
-  const handleCreateRequisition = (e: React.FormEvent) => {
+  const handleCreateRequisition = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim() || !newDesc.trim()) {
       addToast('Please provide a Job Title and Job Description.', 'error');
       return;
     }
-    const newReq: Requisition = {
-      id: Math.floor(Math.random() * 10000) + 200,
-      job_title: newTitle.trim(),
-      location: newLocation.trim() || 'Not specified',
-      target_domain: (newDomain as TargetDomain) || 'Engineering Services',
-      job_description_text: newDesc.trim(),
-      created_at: new Date().toISOString()
-    };
-    setRequisitions(prev => [newReq, ...prev]);
-    setActiveReqId(newReq.id);
-    addToast(`Job requisition "${newTitle.trim()}" created & set as active.`, 'success');
-    setNewTitle('');
-    setNewLocation('');
-    setNewDomain('');
-    setNewDesc('');
+    try {
+      const res = await fetch('http://localhost:5000/api/v1/requisitions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          job_title: newTitle.trim(),
+          location: newLocation.trim() || 'Not specified',
+          target_domain: (newDomain as TargetDomain) || 'Engineering Services',
+          job_description_text: newDesc.trim()
+        })
+      });
+      if (!res.ok) throw new Error('Failed to create requisition');
+      const newReq: Requisition = await res.json();
+      setRequisitions(prev => [newReq, ...prev]);
+      setActiveReqId(newReq.id);
+      addToast(`Job requisition "${newReq.job_title}" created & set as active.`, 'success');
+      setNewTitle('');
+      setNewLocation('');
+      setNewDomain('');
+      setNewDesc('');
+    } catch (err) {
+      addToast('Failed to create job requisition on server.', 'error');
+    }
   };
 
-  const handleDeleteRequisition = (reqId: number) => {
+  const handleDeleteRequisition = async (reqId: number) => {
     const req = requisitions.find(r => r.id === reqId);
     const cascadeCount = candidates.filter(c => c.requisition_id === reqId).length;
-    setCandidates(prev => prev.filter(c => c.requisition_id !== reqId));
-    setRequisitions(prev => prev.filter(r => r.id !== reqId));
-    addToast(`"${req?.job_title}" deleted. ${cascadeCount > 0 ? `${cascadeCount} associated candidate(s) removed.` : ''}`, 'warning');
+    try {
+      await fetch(`http://localhost:5000/api/v1/requisitions/${reqId}`, { method: 'DELETE' });
+      setCandidates(prev => prev.filter(c => c.requisition_id !== reqId));
+      setRequisitions(prev => prev.filter(r => r.id !== reqId));
+      addToast(`"${req?.job_title}" deleted. ${cascadeCount > 0 ? `${cascadeCount} associated candidate(s) removed.` : ''}`, 'warning');
+    } catch (err) {
+      addToast('Failed to delete requisition on server.', 'error');
+    }
   };
 
   // Candidate actions
-  const handleUpdateCandidateStage = (id: number, stage: HiringStage) => {
+  const handleUpdateCandidateStage = async (id: number, stage: HiringStage) => {
     setCandidates(prev => prev.map(c => c.id === id ? { ...c, current_stage: stage } : c));
     const cand = candidates.find(c => c.id === id);
     addToast(`${cand?.full_name} moved to "${stage}".`, 'info');
+    try {
+      await fetch(`http://localhost:5000/api/v1/candidates/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ current_stage: stage })
+      });
+    } catch (err) {
+      addToast('Failed to save stage change to server.', 'error');
+    }
   };
 
-  const handleDeleteCandidate = (id: number) => {
+  const handleDeleteCandidate = async (id: number) => {
     setCandidates(prev => prev.filter(c => c.id !== id));
     addToast('Candidate record deleted.', 'warning');
+    try {
+      await fetch(`http://localhost:5000/api/v1/candidates/${id}`, { method: 'DELETE' });
+    } catch (err) {
+      addToast('Failed to delete candidate on server.', 'error');
+    }
   };
 
-  const handleCandidatesParsed = (newCandidates: Candidate[]) => {
-    setCandidates(prev => {
-      // Deduplicate to prevent duplicate entries by tracking unique name + email
-      const existingKeys = new Set(prev.map(c => `${c.full_name.toLowerCase().trim()}_${c.email.toLowerCase().trim()}`));
-      const uniqueNew = newCandidates.filter(c => {
-        const key = `${c.full_name.toLowerCase().trim()}_${c.email.toLowerCase().trim()}`;
-        if (existingKeys.has(key)) {
-          return false;
-        }
-        existingKeys.add(key);
-        return true;
-      });
-      return [...uniqueNew, ...prev];
-    });
-    addToast(`Successfully screened ${newCandidates.length} candidate CV(s).`, 'success');
+  const handleCandidatesParsed = async (newCandidates: Candidate[], isRescreen: boolean = false) => {
+    try {
+      for (const cand of newCandidates) {
+        await fetch('http://localhost:5000/api/v1/candidates', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(cand)
+        });
+      }
+      const res = await fetch('http://localhost:5000/api/v1/candidates');
+      const updated: Candidate[] = await res.json();
+      setCandidates(updated);
+      addToast(
+        isRescreen 
+          ? `Re-screened ${newCandidates.length} candidate(s) against active requisition.`
+          : `Successfully screened ${newCandidates.length} candidate CV(s).`, 
+        'success'
+      );
+    } catch (err) {
+      addToast('Error saving candidates to server.', 'error');
+    }
   };
 
-  const handleClearAllCandidates = () => {
-    setCandidates([]);
-    setShowClearConfirm(false);
-    addToast('All candidate records cleared from the system.', 'warning');
+  const handleClearAllCandidates = async () => {
+    try {
+      await fetch(`http://localhost:5000/api/v1/candidates/clear?req_id=${activeReqId}`, { method: 'DELETE' });
+      setCandidates(prev => prev.filter(c => c.requisition_id !== activeReqId));
+      setShowClearConfirm(false);
+      addToast('All candidate records cleared from the active requisition.', 'warning');
+    } catch (err) {
+      addToast('Failed to clear candidates on server.', 'error');
+    }
   };
 
   // Dashboard calculations â€” real data
@@ -235,7 +343,11 @@ function App() {
   const highMatchCount = activeCandidates.filter(c => c.match_score >= 80).length;
 
   return (
-    <div className="app-container">
+    <div 
+      className="app-container"
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => e.preventDefault()}
+    >
       
       {/* Confirm Modal */}
       {showClearConfirm && (
@@ -297,6 +409,11 @@ function App() {
           <button onClick={() => setActiveTab('requisitions')} className={`nav-item ${activeTab === 'requisitions' ? 'active' : ''}`}>
             <ClipboardList className="h-4 w-4" /> Job Requisitions
           </button>
+          {authUser.role === 'Admin' && (
+            <button onClick={() => setActiveTab('users')} className={`nav-item ${activeTab === 'users' ? 'active' : ''}`}>
+              <UserCog className="h-4 w-4" /> User Management
+            </button>
+          )}
 
           {/* Active Requisition Selector */}
           <div className="border-t border-[var(--border-light)] mt-4 pt-4 px-2">
@@ -349,11 +466,36 @@ function App() {
         </nav>
 
         <div className="sidebar-footer">
-          <div className="user-avatar">HR</div>
-          <div className="user-info">
-            <span className="user-name">Hirengine Operator</span>
-            <span className="user-role">Lead Recruiter</span>
+          <div className="user-avatar">
+            {authUser.name.split(' ').map((n: string) => n[0]).slice(0, 2).join('').toUpperCase()}
           </div>
+          <div className="user-info" style={{ flex: 1, minWidth: 0 }}>
+            <span className="user-name" title={authUser.name}>{authUser.name}</span>
+            <span className="user-role">{authUser.role}</span>
+          </div>
+          <button
+            onClick={() => {
+              setPasswordError('');
+              setPasswordSuccess('');
+              setOldPassword('');
+              setNewPassword('');
+              setConfirmPassword('');
+              setShowPasswordModal(true);
+            }}
+            title="Change Password"
+            className="flex-shrink-0 p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--primary)] hover:bg-[var(--primary)]/10 transition-colors cursor-pointer"
+            aria-label="Change Password"
+          >
+            <Key className="h-4 w-4" />
+          </button>
+          <button
+            onClick={handleLogout}
+            title="Sign out"
+            className="flex-shrink-0 p-1.5 rounded-lg text-[var(--text-muted)] hover:text-rose-500 hover:bg-rose-50 transition-colors cursor-pointer"
+            aria-label="Sign out"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
         </div>
       </aside>
 
@@ -367,6 +509,7 @@ function App() {
             {activeTab === 'screener' && 'Batch CV Screener'}
             {activeTab === 'directory' && 'Talent Directory'}
             {activeTab === 'requisitions' && 'Job Requisitions Board'}
+            {activeTab === 'users' && 'User Management'}
             {activeRequisition && (
               <span className="text-xs font-normal text-[var(--text-secondary)] bg-black/[0.04] px-2.5 py-1 rounded-[var(--radius-sm)] border border-[var(--border-light)]">
                 Active: <span className="text-[var(--primary)] font-bold">{activeRequisition.job_title}</span>
@@ -818,8 +961,121 @@ function App() {
             </div>
           )}
 
+          {/* ── TAB 5: USER MANAGEMENT ── */}
+          {activeTab === 'users' && authUser.role === 'Admin' && apiFetch && (
+            <UserManagement
+              apiFetch={apiFetch}
+              currentUserEmail={authUser.email}
+            />
+          )}
+
         </div>
       </main>
+
+      {/* Change Password Modal */}
+      {showPasswordModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-fade-in">
+          <div className="bg-white rounded-[var(--radius-lg)] shadow-xl border border-slate-200 w-full max-w-md overflow-hidden">
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-lg bg-[var(--primary)]/10 text-[var(--primary)]">
+                  <Key className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-800">Change Password</h3>
+                  <p className="text-xs text-slate-500">Update security credentials for your account</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPasswordModal(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <XIcon className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleChangePassword} className="p-5 flex flex-col gap-4">
+              {passwordError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg flex items-center gap-2 text-xs font-semibold text-rose-600">
+                  <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                  <span>{passwordError}</span>
+                </div>
+              )}
+              {passwordSuccess && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center gap-2 text-xs font-semibold text-emerald-600">
+                  <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+                  <span>{passwordSuccess}</span>
+                </div>
+              )}
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-slate-600 uppercase">Current Password</label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                  <input
+                    type="password"
+                    required
+                    value={oldPassword}
+                    onChange={e => setOldPassword(e.target.value)}
+                    placeholder="Enter current password"
+                    className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:border-[var(--primary)]"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-slate-600 uppercase">New Password</label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    value={newPassword}
+                    onChange={e => setNewPassword(e.target.value)}
+                    placeholder="At least 6 characters"
+                    className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:border-[var(--primary)]"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-slate-600 uppercase">Confirm New Password</label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    value={confirmPassword}
+                    onChange={e => setConfirmPassword(e.target.value)}
+                    placeholder="Confirm new password"
+                    className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:border-[var(--primary)]"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 mt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPasswordModal(false)}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold border border-slate-300 text-slate-600 hover:bg-slate-50 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={changingPassword || !oldPassword || !newPassword || !confirmPassword}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold bg-[var(--primary)] text-white hover:bg-[var(--primary)]/90 disabled:opacity-50 cursor-pointer"
+                >
+                  {changingPassword ? 'Updating...' : 'Update Password'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Toast Overlay */}
       <div className="toast-container">

@@ -1,11 +1,11 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Upload, FileText, CheckCircle, AlertCircle, RefreshCw, Layers, Plus, ChevronDown, ChevronUp, User, ChevronRight, LayoutList, LayoutGrid, X, CloudDownload, FolderOpen, FileSpreadsheet } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { QueueItem, Requisition, Candidate, TargetDomain } from '../types';
 
 interface BulkUploadQueueProps {
   activeRequisition: Requisition | null;
-  onCandidatesParsed: (candidates: Candidate[]) => void;
+  onCandidatesParsed: (candidates: Candidate[], isRescreen?: boolean) => void;
   candidates: Candidate[];
   queue: QueueItem[];
   setQueue: React.Dispatch<React.SetStateAction<QueueItem[]>>;
@@ -32,15 +32,18 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
   // Lookup order: 1) ID match  2) name+requisition match  3) stale parsedData fallback
   const findLiveCandidate = (parsedData: Partial<Candidate> | undefined): Candidate | undefined => {
     if (!parsedData) return undefined;
-    // Strategy 1: exact ID match (freshly uploaded items)
+    const targetReqId = activeRequisition?.id || parsedData.requisition_id;
+    // Strategy 1: exact ID match prioritized by active requisition
     if (parsedData.id) {
-      const byId = candidates.find(c => c.id === parsedData.id);
+      const byIdAndReq = candidates.find(c => c.id === parsedData.id && c.requisition_id === targetReqId);
+      if (byIdAndReq) return byIdAndReq;
+      const byId = candidates.find(c => c.id === parsedData.id && (!targetReqId || c.requisition_id === targetReqId));
       if (byId) return byId;
     }
-    // Strategy 2: name + requisition match (stale localStorage items where ID drifted)
-    if (parsedData.full_name && parsedData.requisition_id) {
+    // Strategy 2: name + requisition match
+    if (parsedData.full_name) {
       const byName = candidates.find(c =>
-        c.requisition_id === parsedData.requisition_id &&
+        c.requisition_id === targetReqId &&
         c.full_name?.trim().toLowerCase() === parsedData.full_name?.trim().toLowerCase()
       );
       if (byName) return byName;
@@ -70,6 +73,66 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
   const csvInputRef   = useRef<HTMLInputElement>(null);
   const [csvImporting, setCsvImporting] = useState(false);
   const [csvError,     setCsvError]     = useState<string | null>(null);
+
+  // Automatically re-evaluate / re-score items in queue whenever activeRequisition changes
+  useEffect(() => {
+    if (!activeRequisition || queue.length === 0) return;
+
+    const completedToRescreen = queue.filter(
+      item => item.status === 'completed' && item.parsedData && item.parsedData.requisition_id !== activeRequisition.id
+    );
+
+    if (completedToRescreen.length > 0) {
+      const updatedCandidates: Candidate[] = [];
+      const updatedQueue = queue.map(item => {
+        if (item.status === 'completed' && item.parsedData && item.parsedData.requisition_id !== activeRequisition.id) {
+          const d = item.parsedData;
+          // Check if we already have an existing evaluation record for this candidate under activeRequisition
+          const existingEval = candidates.find(c =>
+            c.requisition_id === activeRequisition.id &&
+            (c.id === d.id ||
+             (c.full_name?.trim().toLowerCase() === d.full_name?.trim().toLowerCase() &&
+              c.email?.trim().toLowerCase() === d.email?.trim().toLowerCase()))
+          );
+
+          if (existingEval) {
+            return { ...item, parsedData: existingEval };
+          }
+
+          const candidateText = [
+            `Role: ${d.full_name}.`,
+            `Experience: ${d.total_experience_years || d.relevant_experience_years || 5} years.`,
+            `Skills: ${d.skills_matrix?.join(', ') || 'General'}.`,
+            `Specializations: ${d.specialization_tags?.join(', ') || 'General'}.`,
+            d.industry_remarks || ''
+          ].filter(Boolean).join(' ');
+
+          const screenResult = calculateLocalScreening(candidateText, activeRequisition);
+
+          const newParsedData: Candidate = {
+            ...(d as Candidate),
+            id: d.id || Math.floor(Math.random() * 1000000),
+            requisition_id: activeRequisition.id,
+            total_experience_years: screenResult.totalExperience || d.total_experience_years || 0,
+            relevant_experience_years: screenResult.relevantExperience || d.relevant_experience_years || 0,
+            match_score: screenResult.score,
+            skills_matrix: screenResult.skills.length > 0 ? screenResult.skills : (d.skills_matrix || []),
+            specialization_tags: screenResult.tags.length > 0 ? screenResult.tags : (d.specialization_tags || []),
+            industry_remarks: screenResult.remarks
+          };
+
+          updatedCandidates.push(newParsedData);
+          return { ...item, parsedData: newParsedData };
+        }
+        return item;
+      });
+
+      setQueue(updatedQueue);
+      if (updatedCandidates.length > 0) {
+        onCandidatesParsed(updatedCandidates, true);
+      }
+    }
+  }, [activeRequisition?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -105,7 +168,8 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
       fileName: file.name,
       fileSize: file.size,
       progress: 0,
-      status: 'pending'
+      status: 'pending',
+      file: file
     }));
     setQueue(prev => [...prev, ...newQueueItems]);
     files.forEach((file, index) => processFile(file, newQueueItems[index].id));
@@ -290,16 +354,16 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
         if (uploadResp.ok) {
           const resJson = await uploadResp.json();
           candidateResult = {
-            full_name: resJson.full_name || cleanFileNameToName(file.name),
+            full_name: resJson.full_name ?? resJson.fullName ?? cleanFileNameToName(file.name),
             email: resJson.email,
             phone: resJson.phone,
-            total_experience_years: resJson.total_experience_years,
-            relevant_experience_years: resJson.relevant_experience_years,
-            match_score: resJson.match_score,
-            skills_matrix: resJson.skills_matrix,
-            specialization_tags: resJson.specialization_tags,
-            industry_remarks: resJson.industry_remarks,
-            cv_file_name: resJson.cv_file_name
+            total_experience_years: resJson.total_experience_years ?? resJson.total_experience ?? resJson.totalExperience ?? 0,
+            relevant_experience_years: resJson.relevant_experience_years ?? resJson.relevant_experience ?? resJson.relevantExperience ?? 0,
+            match_score: resJson.match_score ?? resJson.matchScore ?? resJson.score ?? 0,
+            skills_matrix: resJson.skills_matrix ?? resJson.skillsMatrix ?? resJson.skills ?? [],
+            specialization_tags: resJson.specialization_tags ?? resJson.specializationTags ?? resJson.tags ?? [],
+            industry_remarks: resJson.industry_remarks ?? resJson.industryRemarks ?? resJson.remarks ?? '',
+            cv_file_name: resJson.cv_file_name ?? resJson.cvFileName
           };
           uploadSucceeded = true;
           updateProgress(90, 'scoring');
@@ -331,15 +395,15 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
           if (response.ok) {
             const resJson = await response.json();
             candidateResult = {
-              full_name: resJson.full_name || cleanFileNameToName(file.name),
-              email: resJson.email || extractEmailRegex(rawText),
-              phone: resJson.phone || extractPhoneRegex(rawText),
-              total_experience_years: resJson.total_experience_years,
-              relevant_experience_years: resJson.relevant_experience_years,
-              match_score: resJson.match_score,
-              skills_matrix: resJson.skills_matrix,
-              specialization_tags: resJson.specialization_tags,
-              industry_remarks: resJson.industry_remarks
+              full_name: resJson.full_name ?? resJson.fullName ?? cleanFileNameToName(file.name),
+              email: resJson.email ?? extractEmailRegex(rawText),
+              phone: resJson.phone ?? extractPhoneRegex(rawText),
+              total_experience_years: resJson.total_experience_years ?? resJson.total_experience ?? resJson.totalExperience ?? 0,
+              relevant_experience_years: resJson.relevant_experience_years ?? resJson.relevant_experience ?? resJson.relevantExperience ?? 0,
+              match_score: resJson.match_score ?? resJson.matchScore ?? resJson.score ?? 0,
+              skills_matrix: resJson.skills_matrix ?? resJson.skillsMatrix ?? resJson.skills ?? [],
+              specialization_tags: resJson.specialization_tags ?? resJson.specializationTags ?? resJson.tags ?? [],
+              industry_remarks: resJson.industry_remarks ?? resJson.industryRemarks ?? resJson.remarks ?? ''
             };
           } else { throw new Error('Fallback API error'); }
         } catch {
@@ -449,7 +513,8 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
         body: JSON.stringify({
           folder_url: driveUrl.trim(),
           target_domain: activeRequisition.target_domain,
-          requisition_id: activeRequisition.id
+          requisition_id: activeRequisition.id,
+          job_description_text: activeRequisition.job_description_text || ''
         })
       });
 
@@ -569,9 +634,23 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
 
   const cleanFileNameToName = (fileName: string): string => {
     let stem = fileName.replace(/\.[^/.]+$/, ''); // Strip extension
+    // Strip backend uuid hex prefix (e.g., 20345c6e_)
+    stem = stem.replace(/^[0-9a-f]{8}_/i, '');
     // Strip common metadata postfixes
     stem = stem.replace(/(_cv|_resume|_application|\d{4,}).*$/i, '');
+    
+    // Usually the file has the name and title of the person applying separated by hyphen/dash/delimiter
+    if (/[-–—|,]/.test(stem)) {
+      const parts = stem.split(/[-–—|,]/);
+      if (parts[0].trim().length >= 3) {
+        stem = parts[0].trim();
+      }
+    }
+
     stem = stem.replace(/[_\-]+/g, ' ').trim();
+    
+    // Clean prefix labels if present in filename
+    stem = stem.replace(/^(name|full\s*name|candidate\s*name|applicant\s*name|candidate|applicant|resume\s*of|cv\s*of)\s*[:\-–—]\s*/i, '').trim();
     
     // Check if filename contains forbidden generic title keywords
     const forbiddenKeywords = new Set([
@@ -579,12 +658,16 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
       'TECHNICIAN', 'OPERATOR', 'DIRECTOR', 'SUPERVISOR', 'FOREMAN', 'INSPECTOR', 
       'SPECIALIST', 'CONSULTANT', 'CHIEF', 'ADMINISTRATOR', 'LEAD', 'COORDINATOR', 
       'ARCHITECT', 'SURNAME', 'FORENAME', 'FIRSTNAME', 'LASTNAME', 'MIDDLE',
-      'RESUME', 'CV', 'CURRICULUM', 'VITAE', 'CONTACT', 'PROFILE'
+      'RESUME', 'CV', 'CURRICULUM', 'VITAE', 'CONTACT', 'PROFILE',
+      'TESTING', 'COMMISSIONING', 'SURVEYOR', 'EXECUTIVE', 'HEAD', 'ASSISTANT',
+      'SENIOR', 'JUNIOR', 'INTERN', 'TRAINEE', 'ASSOCIATE', 'PROJECT', 'SAFETY',
+      'QUALITY', 'CONTROL', 'ASSURANCE', 'QA', 'QC', 'HSE', 'EHS', 'NDT', 'PIPELINE',
+      'MECHANICAL', 'ELECTRICAL', 'CIVIL', 'INSTRUMENTATION', 'PROCESS', 'INDUSTRIAL'
     ]);
     
     const words = stem.split(/\s+/);
     const cleanedWords = words.filter(w => !forbiddenKeywords.has(w.toUpperCase().replace(/[^\w]/g, '')));
-    if (cleanedWords.length >= 2) {
+    if (cleanedWords.length >= 1) {
       stem = cleanedWords.join(' ');
     }
     
@@ -615,9 +698,14 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
 
     const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
     for (let i = 0; i < Math.min(8, lines.length); i++) {
-      const line = lines[i];
-      const words = line.split(/\s+/);
-      if (!(words.length >= 2 && words.length <= 5)) continue;
+      let line = lines[i];
+      // Strip prefix labels like "NAME : ", "Name:", "Candidate Name:", "Applicant Name:", "Full Name:"
+      line = line.replace(/^(name|full\s*name|candidate\s*name|applicant\s*name|candidate|applicant|resume\s*of|cv\s*of)\s*[:\-–—]\s*/i, '').trim();
+      line = line.replace(/^(NAME|Full Name|Candidate Name|Applicant Name|Name)\s*[:\-]\s*/i, '').trim();
+      if (!line) continue;
+
+      const words = line.split(/[\s._-]+/).filter(Boolean);
+      if (!(words.length >= 1 && words.length <= 6)) continue;
       if (line.includes('@')) continue;
       if (/\d/.test(line)) continue;
       if (nameBlocklist.has(line.toUpperCase())) continue;
@@ -709,7 +797,8 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
 
     if (!isDomainMatch && maxDensity > 2) {
       relevantExperience = Math.max(0, Math.floor(totalExperience * 0.15));
-      score = Math.floor(25 + Math.random() * 10);
+      const baseMismatchScore = Math.min(35, Math.max(12, Math.floor(totalExperience * 1.5) + (extractedSkills.length * 3)));
+      score = baseMismatchScore;
       remarks = `Domain Mismatch. Candidate profile is concentrated in ${candidatePrimaryDomain}. Lacks the required ${currentDomain} domain experience.`;
     } else {
       relevantExperience = totalExperience;
@@ -730,6 +819,15 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
 
   const clearQueue = () => setQueue([]);
 
+  const retryAllFailed = () => {
+    queue.forEach(item => {
+      if (item.status === 'failed' && item.file) {
+        setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: 'pending', progress: 0, error: undefined } : q));
+        processFile(item.file, item.id);
+      }
+    });
+  };
+
   return (
     <div className="flex flex-col gap-6">
 
@@ -740,14 +838,24 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
             <Layers className="text-[var(--primary)] h-5 w-5" />
             Bulk Upload & CV Parser
           </h3>
-          {queue.length > 0 && (
-            <button
-              onClick={clearQueue}
-              className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] px-3.5 py-1.5 bg-black/5 rounded-[var(--radius-sm)] border border-[var(--border-light)] transition-colors cursor-pointer"
-            >
-              Clear Queue
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {queue.some(item => item.status === 'failed' && item.file) && (
+              <button
+                onClick={retryAllFailed}
+                className="text-xs font-semibold text-rose-600 hover:text-white bg-rose-50 hover:bg-rose-600 px-3.5 py-1.5 rounded-[var(--radius-sm)] border border-rose-200 hover:border-rose-600 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              >
+                <RefreshCw className="h-3.5 w-3.5" /> Retry All Failed
+              </button>
+            )}
+            {queue.length > 0 && (
+              <button
+                onClick={clearQueue}
+                className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] px-3.5 py-1.5 bg-black/5 rounded-[var(--radius-sm)] border border-[var(--border-light)] transition-colors cursor-pointer"
+              >
+                Clear Queue
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Active Job Banner */}
@@ -942,9 +1050,9 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
 
               {/* ── TABLE VIEW (default) ── */}
               {queueView === 'table' ? (
-                <div className="flex gap-4 max-h-[440px]">
+                <div className="flex gap-4 max-h-[440px] min-h-0">
                   {/* Left: compact summary rows */}
-                  <div className="flex flex-col gap-1.5 overflow-y-auto flex-shrink-0" style={{ minWidth: 0, width: selectedItem ? '45%' : '100%' }}>
+                  <div className="flex flex-col gap-1.5 max-h-[440px] overflow-y-auto flex-shrink-0 min-h-0 pr-1" style={{ minWidth: 0, width: selectedItem ? '45%' : '100%' }}>
                     {/* In-progress or pending items */}
                     {queue.filter(i => i.status !== 'completed').map(item => {
                       const iconColorClass = getFileIconColor(item.fileName);
@@ -987,9 +1095,9 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
 
                     {/* Completed items as a compact table */}
                     {completedItems.length > 0 && (
-                      <div className="rounded-[var(--radius-md)] border border-[var(--border-light)] overflow-hidden">
+                      <div className="rounded-[var(--radius-md)] border border-[var(--border-light)] overflow-hidden flex-shrink-0">
                         {/* Table header */}
-                        <div className="grid text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-wider bg-black/[0.025] px-3 py-2 border-b border-[var(--border-light)]"
+                        <div className="grid text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-wider bg-[var(--bg-surface)] backdrop-blur-md px-3 py-2 border-b border-[var(--border-light)] sticky top-0 z-10 shadow-sm"
                           style={{ gridTemplateColumns: '1fr 60px 52px 52px' }}
                         >
                           <span>Candidate</span>
@@ -1051,7 +1159,7 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
                     const score = getLiveScore(selectedItem.parsedData);
                     const isEligible = score >= 55 && (d.total_experience_years || 0) >= 5;
                     return (
-                      <div className="flex-1 border border-[var(--border-light)] rounded-[var(--radius-md)] p-4 overflow-y-auto bg-black/[0.01] flex flex-col gap-3 animate-fade-in min-w-0">
+                      <div className="flex-1 max-h-[440px] border border-[var(--border-light)] rounded-[var(--radius-md)] p-4 overflow-y-auto bg-black/[0.01] flex flex-col gap-3 animate-fade-in min-w-0 min-h-0">
                         {/* Header */}
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex flex-col min-w-0">
@@ -1123,7 +1231,7 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
 
               ) : (
                 /* ── CARD VIEW (legacy expanded cards) ── */
-                <div className="flex flex-col gap-3 max-h-[440px] overflow-y-auto pr-1">
+                <div className="flex flex-col gap-3 max-h-[440px] overflow-y-auto pr-1 min-h-0">
                   {queue.map(item => {
                     const iconColorClass = getFileIconColor(item.fileName);
                     const getScoreClass2 = (score: number) => {

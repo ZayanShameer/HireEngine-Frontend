@@ -2,10 +2,11 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { 
   Search, SlidersHorizontal, Table, LayoutDashboard, User, Mail, 
   Phone, Briefcase, Award, X, Trash2, Shield, FileUp, Users, Download,
-  Sparkles, Loader2, Zap
+  Sparkles, Loader2, Zap, MessageSquare, Eye, EyeOff, Send, Clock,
+  CheckSquare, Square, Check
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { Candidate, HiringStage, TargetDomain, Requisition } from '../types';
+import { Candidate, HiringStage, TargetDomain, Requisition, CandidateNote } from '../types';
 
 interface CandidateDirectoryProps {
   candidates: Candidate[];
@@ -39,6 +40,78 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
   // Navigation & View Toggles
   const [viewMode, setViewMode] = useState<'list' | 'kanban'>('list');
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
+  const [cvExists, setCvExists] = useState<boolean | null>(null);
+  const [showPreview, setShowPreview] = useState(false);
+  const [notes, setNotes] = useState<CandidateNote[]>([]);
+  const [newNoteText, setNewNoteText] = useState('');
+  const [loadingNotes, setLoadingNotes] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+
+  useEffect(() => {
+    if (!selectedCandidate) {
+      setNotes([]);
+      setShowPreview(false);
+      return;
+    }
+    setShowPreview(false);
+    setLoadingNotes(true);
+    fetch(`http://localhost:5000/api/v1/candidates/${selectedCandidate.id}/notes`)
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) setNotes(data);
+        setLoadingNotes(false);
+      })
+      .catch(() => setLoadingNotes(false));
+  }, [selectedCandidate?.id]);
+
+  const handleAddNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCandidate || !newNoteText.trim()) return;
+    try {
+      const userStr = localStorage.getItem('hireengine_user');
+      const userObj = userStr ? JSON.parse(userStr) : null;
+      const author_email = userObj?.email || userObj?.name || 'Recruiter';
+      
+      const res = await fetch(`http://localhost:5000/api/v1/candidates/${selectedCandidate.id}/notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ author_email, note_text: newNoteText })
+      });
+      if (res.ok) {
+        const createdNote = await res.json();
+        setNotes(prev => [createdNote, ...prev]);
+        setNewNoteText('');
+      }
+    } catch (err) {
+      alert('Failed to save note.');
+    }
+  };
+
+  const handleDeleteNote = async (noteId: number) => {
+    if (!selectedCandidate) return;
+    try {
+      const res = await fetch(`http://localhost:5000/api/v1/candidates/${selectedCandidate.id}/notes/${noteId}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        setNotes(prev => prev.filter(n => n.id !== noteId));
+      }
+    } catch (err) {
+      alert('Failed to delete note.');
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedCandidate?.cv_file_name) {
+      setCvExists(null);
+      return;
+    }
+    setCvExists(null);
+    fetch(`http://localhost:5000/api/v1/cv/${selectedCandidate.cv_file_name}/exists`)
+      .then(res => res.json())
+      .then(data => setCvExists(data.exists))
+      .catch(() => setCvExists(false));
+  }, [selectedCandidate?.cv_file_name]);
 
   // Faceted Search Filters State
   const [searchQuery, setSearchQuery] = useState('');
@@ -182,6 +255,29 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
     return matchSearch && matchDomain && matchSpec && matchScore;
   });
 
+  const toggleSelectAll = () => {
+    if (selectedIds.length === filteredCandidates.length && filteredCandidates.length > 0) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(filteredCandidates.map(c => c.id));
+    }
+  };
+
+  const toggleSelectCandidate = (e: React.MouseEvent, id: number) => {
+    e.stopPropagation();
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]);
+  };
+
+  const handleBulkStageMove = (stage: HiringStage) => {
+    selectedIds.forEach(id => {
+      onUpdateCandidateStage(id, stage);
+    });
+    if (stage === 'Shortlist' || stage === 'Hired') {
+      triggerConfettiBlast();
+    }
+    setSelectedIds([]);
+  };
+
   // HTML5 Drag and Drop Handlers for Kanban Workspace
   const handleDragStart = (e: React.DragEvent, id: number) => {
     e.dataTransfer.setData('text/plain', id.toString());
@@ -189,10 +285,12 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
   };
 
   const handleDrop = (e: React.DragEvent, targetStage: HiringStage) => {
     e.preventDefault();
+    e.stopPropagation();
     const idStr = e.dataTransfer.getData('text/plain');
     if (idStr) {
       const candidateId = parseInt(idStr, 10);
@@ -253,39 +351,88 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
   }
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div 
+      className="flex flex-col h-full overflow-hidden"
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => e.preventDefault()}
+    >
       {/* View Toolbar Controls */}
-      <div className="flex items-center justify-between mb-8 flex-shrink-0 bg-black/[0.015] border border-[var(--border-light)] p-4 rounded-[var(--radius-lg)]">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setViewMode('list')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-[var(--radius-md)] text-sm font-semibold transition-all border cursor-pointer ${
-              viewMode === 'list' 
-                ? 'bg-[var(--primary)] text-white border-transparent shadow-lg' 
-                : 'text-[var(--text-secondary)] border-transparent hover:bg-black/5'
-            }`}
-          >
-            <Table className="h-4.5 w-4.5" /> List Directory
-          </button>
-          <button
-            onClick={() => setViewMode('kanban')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-[var(--radius-md)] text-sm font-semibold transition-all border cursor-pointer ${
-              viewMode === 'kanban' 
-                ? 'bg-[var(--primary)] text-white border-transparent shadow-lg' 
-                : 'text-[var(--text-secondary)] border-transparent hover:bg-black/5'
-            }`}
-          >
-            <LayoutDashboard className="h-4.5 w-4.5" /> Kanban Pipeline
-          </button>
+      <div className="flex flex-col gap-3 mb-6 flex-shrink-0 bg-black/[0.015] border border-[var(--border-light)] p-4 rounded-[var(--radius-lg)]">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setViewMode('list')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-[var(--radius-md)] text-sm font-semibold transition-all border cursor-pointer ${
+                viewMode === 'list' 
+                  ? 'bg-[var(--primary)] text-white border-transparent shadow-lg' 
+                  : 'text-[var(--text-secondary)] border-transparent hover:bg-black/5'
+              }`}
+            >
+              <Table className="h-4.5 w-4.5" /> List Directory
+            </button>
+            <button
+              onClick={() => setViewMode('kanban')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-[var(--radius-md)] text-sm font-semibold transition-all border cursor-pointer ${
+                viewMode === 'kanban' 
+                  ? 'bg-[var(--primary)] text-white border-transparent shadow-lg' 
+                  : 'text-[var(--text-secondary)] border-transparent hover:bg-black/5'
+              }`}
+            >
+              <LayoutDashboard className="h-4.5 w-4.5" /> Kanban Pipeline
+            </button>
+            <button
+              onClick={toggleSelectAll}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-[var(--radius-md)] text-xs font-semibold bg-white border border-[var(--border-light)] text-[var(--text-secondary)] hover:text-[var(--primary)] hover:border-[var(--primary)]/30 transition-all cursor-pointer shadow-2xs ml-2"
+              title="Select or deselect all visible candidates"
+            >
+              {selectedIds.length === filteredCandidates.length && filteredCandidates.length > 0 ? (
+                <CheckSquare className="h-4 w-4 text-[var(--primary)]" />
+              ) : (
+                <Square className="h-4 w-4 text-slate-400" />
+              )}
+              {selectedIds.length === filteredCandidates.length && filteredCandidates.length > 0 ? 'Deselect All' : 'Select All'}
+            </button>
+          </div>
+
+          <div className="text-sm text-[var(--text-secondary)] font-medium">
+            Found <span className="font-bold text-[var(--text-primary)] text-base">{filteredCandidates.length}</span> candidates
+          </div>
         </div>
 
-        <div className="text-sm text-[var(--text-secondary)] font-medium">
-          Found <span className="font-bold text-[var(--text-primary)] text-base">{filteredCandidates.length}</span> candidates
-        </div>
+        {/* Bulk Action Banner */}
+        {selectedIds.length > 0 && (
+          <div className="flex items-center justify-between bg-[var(--primary-glow)] border border-[var(--primary)]/30 px-4 py-2.5 rounded-[var(--radius-md)] animate-fade-in flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <span className="bg-[var(--primary)] text-white text-xs font-black px-2.5 py-1 rounded-full">
+                {selectedIds.length}
+              </span>
+              <span className="text-xs font-bold text-[var(--primary)] uppercase tracking-wider">
+                Candidates Selected — Move To:
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {STAGES.map(stage => (
+                <button
+                  key={stage}
+                  onClick={() => handleBulkStageMove(stage)}
+                  className="text-xs font-bold px-2.5 py-1 rounded bg-white hover:bg-[var(--primary)] text-slate-700 hover:text-white border border-slate-200 hover:border-[var(--primary)] transition-all cursor-pointer shadow-2xs"
+                >
+                  {stage}
+                </button>
+              ))}
+              <button
+                onClick={() => setSelectedIds([])}
+                className="text-xs font-semibold text-slate-400 hover:text-rose-500 ml-2 px-2 py-1 cursor-pointer"
+              >
+                Clear Selection
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Main Split-Panel Layout */}
-      <div className="flex flex-1 gap-8 overflow-hidden min-h-0">
+      <div className="flex flex-col xl:flex-row flex-1 gap-8 overflow-hidden min-h-0">
         
         {/* Left Sidebar: Faceted Navigation */}
         <div className="faceted-sidebar">
@@ -463,10 +610,10 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
         </div>
 
         {/* Right Main Panel: Directory Visualization */}
-        <div className={viewMode === 'kanban' ? 'flex-1 min-h-0 overflow-hidden' : 'flex-1 overflow-y-auto min-h-0 pr-1'}>
+        <div className={viewMode === 'kanban' ? 'flex-1 min-h-0 overflow-hidden pt-1' : 'flex-1 overflow-y-auto min-h-0 pr-1 pt-3 pb-6 pl-1'}>
           {viewMode === 'list' ? (
             /* LIST VIEW GRID */
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
               {filteredCandidates.map(candidate => (
                 <div
                   key={candidate.id}
@@ -476,18 +623,38 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                   <div className="flex-1 flex flex-col justify-start">
                     {/* Header: Name, Score */}
                     <div className="candidate-card-header">
-                      <div className="flex flex-col">
+                      <button
+                        type="button"
+                        onClick={(e) => toggleSelectCandidate(e, candidate.id)}
+                        className="mr-2 p-1 rounded hover:bg-black/5 transition-colors cursor-pointer flex-shrink-0"
+                        title={selectedIds.includes(candidate.id) ? "Deselect candidate" : "Select candidate"}
+                      >
+                        {selectedIds.includes(candidate.id) ? (
+                          <CheckSquare className="h-4 w-4 text-[var(--primary)]" />
+                        ) : (
+                          <Square className="h-4 w-4 text-slate-300 hover:text-slate-500" />
+                        )}
+                      </button>
+
+                      <div className="flex flex-col min-w-0 flex-1 mr-3">
                         <h4 className="candidate-card-title">
                           {candidate.full_name}
                         </h4>
-                        <span className="candidate-card-subtitle">
-                          <Briefcase className="h-3.5 w-3.5 text-[var(--primary)]" /> Exp: {candidate.total_experience_years} Years (Rel: {candidate.relevant_experience_years}y)
+                        <span className="candidate-card-subtitle truncate">
+                          <Briefcase className="h-3.5 w-3.5 text-[var(--primary)] flex-shrink-0" /> Exp: {candidate.total_experience_years} Years (Rel: {candidate.relevant_experience_years}y)
                         </span>
                       </div>
 
-                      <span className={`score-badge ${getScoreColorClass(candidate.match_score)} w-12 h-12 rounded-full border flex items-center justify-center font-black text-sm flex-shrink-0`}>
-                        {candidate.match_score}
-                      </span>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {candidate.ai_analysis && (
+                          <span className="text-[10px] bg-purple-500/10 border border-purple-500/30 text-purple-600 font-bold px-2 py-0.5 rounded-full flex items-center gap-1" title="Analyzed by Google Gemini AI">
+                            <Sparkles className="h-3 w-3" /> AI
+                          </span>
+                        )}
+                        <span className={`score-badge ${getScoreColorClass(candidate.match_score)} w-12 h-12 rounded-full border flex items-center justify-center font-black text-sm flex-shrink-0`}>
+                          {candidate.match_score}
+                        </span>
+                      </div>
                     </div>
 
                     {/* Magic Search relevance badge */}
@@ -592,7 +759,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                     </div>
 
                     {/* Column Cards Container */}
-                    <div className="flex-1 flex flex-col gap-3 overflow-y-auto min-h-0 pr-0.5">
+                    <div className="flex-1 flex flex-col gap-3 overflow-y-auto min-h-0 pr-0.5 pt-2 pb-3 pl-0.5">
                       {stageCandidates.map(candidate => (
                         <div
                            key={candidate.id}
@@ -602,12 +769,33 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                            className="bg-[var(--bg-surface)] border border-[var(--border-light)] hover:border-[var(--primary)] rounded-[var(--radius-md)] p-4 cursor-grab active:cursor-grabbing transition-all hover:-translate-y-0.5 shadow-md flex flex-col gap-3"
                         >
                           <div className="flex items-start justify-between gap-3">
-                            <span className="text-sm font-bold text-[var(--text-primary)] truncate max-w-[150px]" title={candidate.full_name}>
-                              {candidate.full_name}
-                            </span>
-                            <span className={`text-xs font-bold px-2 py-0.5 rounded border ${getScoreColorClass(candidate.match_score)}`}>
-                              {candidate.match_score}%
-                            </span>
+                            <div className="flex items-start gap-2 min-w-0 flex-1 mr-2">
+                              <button
+                                type="button"
+                                onClick={(e) => toggleSelectCandidate(e, candidate.id)}
+                                className="mt-0.5 p-0.5 rounded hover:bg-black/5 transition-colors cursor-pointer flex-shrink-0"
+                                title={selectedIds.includes(candidate.id) ? "Deselect candidate" : "Select candidate"}
+                              >
+                                {selectedIds.includes(candidate.id) ? (
+                                  <CheckSquare className="h-3.5 w-3.5 text-[var(--primary)]" />
+                                ) : (
+                                  <Square className="h-3.5 w-3.5 text-slate-300 hover:text-slate-500" />
+                                )}
+                              </button>
+                              <span className="text-sm font-bold text-[var(--text-primary)] break-words min-w-0" title={candidate.full_name}>
+                                {candidate.full_name}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                              {candidate.ai_analysis && (
+                                <span className="text-[10px] bg-purple-500/10 border border-purple-500/30 text-purple-600 font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5" title="Analyzed by Google Gemini AI">
+                                  <Sparkles className="h-2.5 w-2.5" />
+                                </span>
+                              )}
+                              <span className={`text-xs font-bold px-2 py-0.5 rounded border ${getScoreColorClass(candidate.match_score)}`}>
+                                {candidate.match_score}%
+                              </span>
+                            </div>
                           </div>
 
                           <p className="text-xs text-[var(--text-secondary)] leading-relaxed line-clamp-2">
@@ -729,14 +917,68 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                   <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
                     <Download className="h-4 w-4 text-[var(--primary)]" /> Original CV File
                   </h4>
-                  <a
-                    href={`http://localhost:5000/api/v1/cv/${selectedCandidate.cv_file_name}`}
-                    download
-                    className="flex items-center justify-center gap-2 py-2.5 px-4 rounded-[var(--radius-md)] border border-[var(--primary)]/40 bg-[var(--primary)]/5 text-[var(--primary)] text-sm font-semibold hover:bg-[var(--primary)]/10 transition-colors"
-                  >
-                    <Download className="h-4 w-4" />
-                    Download {selectedCandidate.cv_file_name.replace(/^[a-f0-9]{8}_/, '')}
-                  </a>
+                  {cvExists === false ? (
+                    <div className="py-2.5 px-4 rounded-[var(--radius-md)] border border-amber-200 bg-amber-50 text-amber-700 text-xs text-center font-medium">
+                      ⚠️ CV file no longer available on server (may have been deleted or moved from uploads directory).
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          disabled={cvExists === null}
+                          onClick={async (e) => {
+                            e.preventDefault();
+                            try {
+                              const res = await fetch(`http://localhost:5000/api/v1/cv/${selectedCandidate.cv_file_name}`);
+                              if (!res.ok) {
+                                alert('CV file not found on the server (it may have been deleted or expired from disk).');
+                                return;
+                              }
+                              const blob = await res.blob();
+                              const url = window.URL.createObjectURL(blob);
+                              const link = document.createElement('a');
+                              link.href = url;
+                              link.download = selectedCandidate.cv_file_name!.replace(/^[a-f0-9]{8}_/, '');
+                              document.body.appendChild(link);
+                              link.click();
+                              document.body.removeChild(link);
+                              window.URL.revokeObjectURL(url);
+                            } catch (err) {
+                              alert('Failed to connect to backend server to download CV file.');
+                            }
+                          }}
+                          className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-[var(--radius-md)] border text-sm font-semibold transition-colors ${
+                            cvExists === null
+                              ? 'border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed'
+                              : 'border-[var(--primary)]/40 bg-[var(--primary)]/5 text-[var(--primary)] hover:bg-[var(--primary)]/10 cursor-pointer'
+                          }`}
+                        >
+                          <Download className="h-4 w-4" />
+                          {cvExists === null ? 'Checking…' : 'Download'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowPreview(!showPreview)}
+                          className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-[var(--radius-md)] border text-sm font-semibold transition-colors cursor-pointer ${
+                            showPreview ? 'bg-[var(--primary)] text-white border-[var(--primary)]' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          {showPreview ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          {showPreview ? 'Close Preview' : 'Inline Preview'}
+                        </button>
+                      </div>
+                      {showPreview && (
+                        <div className="w-full h-[500px] border border-slate-300 rounded-[var(--radius-md)] overflow-hidden shadow-inner bg-slate-100 mt-1">
+                          <iframe
+                            src={`http://localhost:5000/api/v1/cv/${selectedCandidate.cv_file_name}#view=FitH`}
+                            className="w-full h-full"
+                            title="CV Inline Preview"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -767,6 +1009,65 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                 </div>
               </div>
 
+              {/* AI Intelligence Panel */}
+              {selectedCandidate.ai_analysis && (
+                <div className="flex flex-col gap-3 bg-gradient-to-br from-purple-500/10 via-indigo-500/5 to-transparent border border-purple-500/30 rounded-[var(--radius-lg)] p-5 animate-fade-in shadow-sm">
+                  <div className="flex items-center gap-2 text-purple-600 font-extrabold text-xs uppercase tracking-wider">
+                    <Sparkles className="h-4.5 w-4.5 text-purple-600 animate-pulse" /> AI Semantic Intelligence Report (Google Gemini)
+                  </div>
+                  
+                  {selectedCandidate.ai_analysis.summary && (
+                    <p className="text-sm text-[var(--text-primary)] font-medium leading-relaxed bg-white/60 dark:bg-black/20 p-3 rounded-md border border-purple-500/10">
+                      {selectedCandidate.ai_analysis.summary}
+                    </p>
+                  )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-1">
+                    {selectedCandidate.ai_analysis.strengths && selectedCandidate.ai_analysis.strengths.length > 0 && (
+                      <div className="flex flex-col gap-1.5">
+                        <span className="text-xs font-bold text-emerald-600 uppercase tracking-wider flex items-center gap-1">
+                          ✓ Verified Strengths
+                        </span>
+                        <ul className="text-xs text-[var(--text-secondary)] space-y-1 pl-4 list-disc marker:text-emerald-500">
+                          {selectedCandidate.ai_analysis.strengths.map((str, idx) => (
+                            <li key={idx} className="leading-normal">{str}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {selectedCandidate.ai_analysis.gaps && selectedCandidate.ai_analysis.gaps.length > 0 && (
+                      <div className="flex flex-col gap-1.5">
+                        <span className="text-xs font-bold text-amber-600 uppercase tracking-wider flex items-center gap-1">
+                          ⚠️ Potential Gaps / Watchouts
+                        </span>
+                        <ul className="text-xs text-[var(--text-secondary)] space-y-1 pl-4 list-disc marker:text-amber-500">
+                          {selectedCandidate.ai_analysis.gaps.map((gap, idx) => (
+                            <li key={idx} className="leading-normal">{gap}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+
+                  {selectedCandidate.ai_analysis.interview_questions && selectedCandidate.ai_analysis.interview_questions.length > 0 && (
+                    <div className="mt-2 pt-3 border-t border-purple-500/20 flex flex-col gap-2">
+                      <span className="text-xs font-bold text-purple-600 uppercase tracking-wider">
+                        🎙️ Recommended Technical Interview Questions
+                      </span>
+                      <div className="space-y-2">
+                        {selectedCandidate.ai_analysis.interview_questions.map((q, idx) => (
+                          <div key={idx} className="text-xs bg-white/80 dark:bg-black/30 p-2.5 rounded border border-purple-500/15 text-[var(--text-primary)] font-medium flex gap-2">
+                            <span className="text-purple-600 font-bold">Q{idx+1}.</span>
+                            <span>{q}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Skills Matrix */}
               <div className="flex flex-col gap-3">
                 <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
@@ -796,6 +1097,68 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                   </div>
                 </div>
               )}
+
+              {/* Recruiter Evaluation Notes */}
+              <div className="flex flex-col gap-3 mt-2 border-t border-[var(--border-light)] pt-4">
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                  <MessageSquare className="h-4 w-4 text-[var(--primary)]" /> Recruiter Evaluation Notes ({notes.length})
+                </h4>
+                
+                {/* Add Note Form */}
+                <form onSubmit={handleAddNote} className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newNoteText}
+                    onChange={e => setNewNoteText(e.target.value)}
+                    placeholder="Add interview feedback, evaluation note, or remark..."
+                    className="flex-1 text-sm bg-white border border-slate-300 rounded-[var(--radius-md)] px-3 py-2 focus:outline-none focus:border-[var(--primary)]"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!newNoteText.trim()}
+                    className="bg-[var(--primary)] text-white px-4 py-2 rounded-[var(--radius-md)] text-sm font-semibold disabled:opacity-50 hover:bg-[var(--primary)]/90 flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Send className="h-3.5 w-3.5" /> Post
+                  </button>
+                </form>
+
+                {/* Notes List */}
+                <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
+                  {loadingNotes ? (
+                    <div className="text-center py-4 text-xs text-slate-400 flex items-center justify-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" /> Loading notes...
+                    </div>
+                  ) : notes.length === 0 ? (
+                    <div className="text-center py-4 text-xs text-slate-400 bg-black/[0.01] border border-[var(--border-light)] rounded-[var(--radius-md)]">
+                      No evaluation notes yet. Be the first to leave feedback!
+                    </div>
+                  ) : (
+                    notes.map(note => (
+                      <div key={note.id} className="bg-white border border-slate-200 rounded-[var(--radius-md)] p-3 flex flex-col gap-1 shadow-2xs relative group">
+                        <div className="flex items-center justify-between text-[11px] text-slate-400">
+                          <span className="font-bold text-slate-700 flex items-center gap-1">
+                            <User className="h-3 w-3 text-[var(--primary)]" /> {note.author_email}
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="flex items-center gap-1">
+                              <Clock className="h-3 w-3" /> {new Date(note.created_at).toLocaleDateString()} {new Date(note.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteNote(note.id)}
+                              className="text-slate-300 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100 cursor-pointer p-0.5"
+                              title="Delete Note"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                        <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap mt-0.5">{note.note_text}</p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
             </div>
 
             {/* Footer stage actions */}

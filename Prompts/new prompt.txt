@@ -5,8 +5,6 @@ Execute this extraction and matching logic strictly according to the rules below
 ### 1. NAME EXTRACTION RULES
 - Locate the candidate's absolute legal full name from the top header lines of the document text.
 - STRIP and IGNORE all trailing credentials, post-nominal titles, or certifications (e.g., "MBA", "PMP", "Ph.D", "SEC Approved").
-- STRIP and IGNORE prefix labels such as "NAME :", "Name:", "Full Name:", "Candidate Name:", "Applicant Name:", "Resume of:", or "CV of:".
-- If the filename is formatted as <Candidate Name> - <Job Title>, extract the candidate name before the delimiter if the resume header text is unclear.
 - BLOCKLIST CRITICAL ERROR: Under no circumstances use standard resume structural section headers (such as "PERSONAL DETAILS", "PROFESSIONAL SUMMARY", "CAREER SUMMARY", "RESUME", or "EDUCATION") as the candidate's name. If no explicit name is identifiable, fallback to "Unknown Candidate".
 
 ### 2. EXPERIENCE TIMELINE TRACKING RULES

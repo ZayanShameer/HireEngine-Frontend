@@ -45,6 +45,12 @@ export interface Candidate {
   specialization_tags: string[]; // GIN indexed tags (e.g. ['13.8KV', '380KV'])
   industry_remarks: string; // Context-aware validation summary
   cv_file_name?: string; // Stored filename on backend (e.g. 'a3f9b2c1_John_CV.pdf')
+  ai_analysis?: {
+    summary?: string;
+    strengths?: string[];
+    gaps?: string[];
+    interview_questions?: string[];
+  };
   created_at: string; // ISO Timestamp
 }
 
@@ -57,6 +63,7 @@ export interface QueueItem {
   status: 'pending' | 'extracting' | 'scoring' | 'completed' | 'failed';
   error?: string;
   parsedData?: Partial<Candidate>;
+  file?: File;
 }
 
 // State management search filters for Faceted Search Sidebar
@@ -67,4 +74,12 @@ export interface FilterState {
   minExperience: number;
   matchScoreRange: [number, number]; // [min, max]
   stages: HiringStage[];
+}
+
+export interface CandidateNote {
+  id: number;
+  candidate_id: number;
+  author_email: string;
+  note_text: string;
+  created_at: string;
 }

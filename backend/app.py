@@ -5,6 +5,12 @@ import os
 import tempfile
 import shutil
 import uuid
+import json
+import hashlib
+import hmac
+import time
+import base64
+from ai_service import analyze_candidate_with_ai
 
 # Optional libraries for PDF and DOCX parsing
 try:
@@ -25,6 +31,496 @@ except ImportError:
 app = Flask(__name__)
 # Enable CORS for frontend integration
 CORS(app, resources={r"/api/*": {"origins": "*"}})
+
+# ── JWT Auth Config ──────────────────────────────────────────────────────────
+JWT_SECRET = os.environ.get('HIREENGINE_JWT_SECRET', 'hireengine-super-secret-jwt-key-2026')
+JWT_EXPIRY_HOURS = 24
+USERS_DB_PATH = os.path.join(os.path.dirname(__file__), 'users.json')
+
+def _load_users():
+    if not os.path.exists(USERS_DB_PATH):
+        # Seed a default admin account on first launch
+        default = [
+            {
+                'id': str(uuid.uuid4()),
+                'email': 'admin@hireengine.ai',
+                'password_hash': _hash_password('admin1234'),
+                'name': 'System Administrator',
+                'role': 'Admin'
+            }
+        ]
+        with open(USERS_DB_PATH, 'w') as f:
+            json.dump(default, f, indent=2)
+        return default
+    with open(USERS_DB_PATH, 'r') as f:
+        return json.load(f)
+
+def _save_users(users):
+    with open(USERS_DB_PATH, 'w') as f:
+        json.dump(users, f, indent=2)
+
+def _hash_password(password: str) -> str:
+    """SHA-256 HMAC password hash (simple, no bcrypt dependency required)."""
+    return hmac.new(JWT_SECRET.encode(), password.encode(), hashlib.sha256).hexdigest()
+
+def _check_password(password: str, stored_hash: str) -> bool:
+    return hmac.compare_digest(_hash_password(password), stored_hash)
+
+def _b64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b'=').decode()
+
+def _b64url_decode(s: str) -> bytes:
+    padding = 4 - len(s) % 4
+    return base64.urlsafe_b64decode(s + '=' * (padding % 4))
+
+def _create_jwt(payload: dict) -> str:
+    header = _b64url_encode(json.dumps({'alg': 'HS256', 'typ': 'JWT'}).encode())
+    payload_enc = _b64url_encode(json.dumps(payload).encode())
+    sig_input = f'{header}.{payload_enc}'.encode()
+    signature = hmac.new(JWT_SECRET.encode(), sig_input, hashlib.sha256).digest()
+    return f'{header}.{payload_enc}.{_b64url_encode(signature)}'
+
+def _verify_jwt(token: str) -> dict | None:
+    try:
+        parts = token.split('.')
+        if len(parts) != 3:
+            return None
+        header, payload_enc, sig_b64 = parts
+        sig_input = f'{header}.{payload_enc}'.encode()
+        expected_sig = hmac.new(JWT_SECRET.encode(), sig_input, hashlib.sha256).digest()
+        if not hmac.compare_digest(_b64url_decode(sig_b64), expected_sig):
+            return None
+        payload = json.loads(_b64url_decode(payload_enc))
+        if payload.get('exp', 0) < time.time():
+            return None
+        return payload
+    except Exception:
+        return None
+
+@app.route('/api/v1/auth/login', methods=['POST'])
+def auth_login():
+    data = request.get_json(force=True, silent=True) or {}
+    email = str(data.get('email', '')).strip().lower()
+    password = str(data.get('password', ''))
+
+    if not email or not password:
+        return jsonify({'error': 'Email and password are required.'}), 400
+
+    users = _load_users()
+    user = next((u for u in users if u['email'].lower() == email), None)
+    if not user or not _check_password(password, user['password_hash']):
+        return jsonify({'error': 'Invalid email or password.'}), 401
+
+    exp = time.time() + JWT_EXPIRY_HOURS * 3600
+    token = _create_jwt({'sub': user['id'], 'email': user['email'], 'exp': exp})
+    return jsonify({
+        'token': token,
+        'user': {'name': user['name'], 'role': user['role'], 'email': user['email']}
+    })
+
+@app.route('/api/v1/auth/register', methods=['POST'])
+def auth_register():
+    data = request.get_json(force=True, silent=True) or {}
+    email = str(data.get('email', '')).strip().lower()
+    password = str(data.get('password', ''))
+    name = str(data.get('name', '')).strip()
+    role = str(data.get('role', 'Recruiter')).strip()
+
+    if not email or not password or not name:
+        return jsonify({'error': 'name, email and password are required.'}), 400
+    if len(password) < 6:
+        return jsonify({'error': 'Password must be at least 6 characters.'}), 400
+
+    users = _load_users()
+    if any(u['email'].lower() == email for u in users):
+        return jsonify({'error': 'An account with this email already exists.'}), 409
+
+    new_user = {
+        'id': str(uuid.uuid4()),
+        'email': email,
+        'password_hash': _hash_password(password),
+        'name': name,
+        'role': role
+    }
+    users.append(new_user)
+    _save_users(users)
+
+    exp = time.time() + JWT_EXPIRY_HOURS * 3600
+    token = _create_jwt({'sub': new_user['id'], 'email': new_user['email'], 'exp': exp})
+    return jsonify({
+        'token': token,
+        'user': {'name': name, 'role': role, 'email': email}
+    }), 201
+
+@app.route('/api/v1/auth/verify', methods=['GET'])
+def auth_verify():
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return jsonify({'valid': False}), 401
+    token = auth_header[7:]
+    payload = _verify_jwt(token)
+    if not payload:
+        return jsonify({'valid': False, 'error': 'Token expired or invalid.'}), 401
+    users = _load_users()
+    user = next((u for u in users if u['id'] == payload.get('sub')), None)
+    if not user:
+        return jsonify({'valid': False}), 401
+    return jsonify({'valid': True, 'user': {'name': user['name'], 'role': user['role'], 'email': user['email']}})
+
+def _require_user(req):
+    """Helper: verify Bearer token and return the calling user, else None."""
+    auth_header = req.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return None
+    payload = _verify_jwt(auth_header[7:])
+    if not payload:
+        return None
+    users = _load_users()
+    return next((u for u in users if u['id'] == payload.get('sub')), None)
+
+def _require_admin(request):
+    """Helper: verify Bearer token and return the calling user if they are Admin, else None."""
+    caller = _require_user(request)
+    if not caller or caller.get('role') != 'Admin':
+        return None
+    return caller
+
+@app.route('/api/v1/auth/change-password', methods=['PUT'])
+def auth_change_password():
+    """Change logged-in user password."""
+    caller = _require_user(request)
+    if not caller:
+        return jsonify({'error': 'Authentication required.'}), 401
+    data = request.json or {}
+    old_password = data.get('old_password', '')
+    new_password = data.get('new_password', '')
+    if not old_password or not new_password:
+        return jsonify({'error': 'Old and new password are required.'}), 400
+    if not _check_password(old_password, caller['password_hash']):
+        return jsonify({'error': 'Incorrect current password.'}), 400
+    if len(new_password) < 6:
+        return jsonify({'error': 'New password must be at least 6 characters.'}), 400
+    users = _load_users()
+    for u in users:
+        if u['id'] == caller['id']:
+            u['password_hash'] = _hash_password(new_password)
+            break
+    _save_users(users)
+    return jsonify({'success': True, 'message': 'Password changed successfully.'})
+
+@app.route('/api/v1/auth/users', methods=['GET'])
+def auth_list_users():
+    """List all system users — Admin only."""
+    caller = _require_admin(request)
+    if not caller:
+        return jsonify({'error': 'Admin access required.'}), 403
+    users = _load_users()
+    safe = [{'id': u['id'], 'email': u['email'], 'name': u['name'], 'role': u['role']} for u in users]
+    return jsonify({'users': safe})
+
+@app.route('/api/v1/auth/users/<string:user_id>', methods=['DELETE'])
+def auth_delete_user(user_id):
+    """Delete a user account — Admin only, cannot delete self."""
+    caller = _require_admin(request)
+    if not caller:
+        return jsonify({'error': 'Admin access required.'}), 403
+    if caller['id'] == user_id:
+        return jsonify({'error': 'You cannot delete your own account.'}), 400
+    users = _load_users()
+    target = next((u for u in users if u['id'] == user_id), None)
+    if not target:
+        return jsonify({'error': 'User not found.'}), 404
+    users = [u for u in users if u['id'] != user_id]
+    _save_users(users)
+    return jsonify({'success': True, 'deleted': target['email']})
+# ── SQLite Database Layer ──────────────────────────────────────────────────────
+import sqlite3
+
+DB_PATH = os.path.join(os.path.dirname(__file__), 'hireengine.db')
+
+SEED_REQUISITIONS = [
+    {'id': 101, 'job_title': 'Petroleum Pipeline Engineer',     'location': 'Riyadh, Saudi Arabia',  'target_domain': 'Oil & Gas',                   'job_description_text': 'Looking for a Senior Pipeline Engineer with experience in petroleum pipelines, drilling simulation, gas reservoirs, refining operations, offshore wellhead setups, and hydrocarbon transport. HSE certifications required.'},
+    {'id': 102, 'job_title': 'Process Engineer — Petrochemical Plant', 'location': 'Jubail, Saudi Arabia',  'target_domain': 'Petrochemical',               'job_description_text': 'Seeking a process engineer with expertise in distillation operations, catalyst management, feedstock handling, chemical process optimization, and plant safety. HAZOP experience is a strong advantage.'},
+    {'id': 103, 'job_title': 'MEP Site Engineer',               'location': 'Dubai, UAE',             'target_domain': 'Construction & Infrastructure', 'job_description_text': 'Hiring an MEP site engineer for large-scale infrastructure projects. Must have experience in mechanical, electrical, and plumbing systems, site management, AutoCAD, and Primavera P6 scheduling.'},
+    {'id': 104, 'job_title': 'Marine Engineer — Vessel Operations', 'location': 'Abu Dhabi, UAE',        'target_domain': 'Maritime & Shipping',         'job_description_text': 'Recruiting a qualified marine engineer for vessel operations and maintenance. STCW certification required. Experience in cargo handling, port logistics, and maritime safety compliance is essential.'},
+]
+
+def get_db():
+    """Return a SQLite connection with row_factory set."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute('PRAGMA journal_mode=WAL')
+    conn.execute('PRAGMA foreign_keys=ON')
+    return conn
+
+def init_db():
+    """Create tables if missing and seed default requisitions on first launch."""
+    with get_db() as conn:
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS requisitions (
+                id           INTEGER PRIMARY KEY,
+                job_title    TEXT NOT NULL,
+                location     TEXT NOT NULL DEFAULT "Not specified",
+                target_domain TEXT NOT NULL,
+                job_description_text TEXT NOT NULL,
+                created_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS candidates (
+                id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+                requisition_id           INTEGER NOT NULL REFERENCES requisitions(id) ON DELETE CASCADE,
+                full_name                TEXT NOT NULL,
+                email                    TEXT NOT NULL DEFAULT "",
+                phone                    TEXT NOT NULL DEFAULT "",
+                passport_number          TEXT,
+                current_stage            TEXT NOT NULL DEFAULT "Screening",
+                total_experience_years   REAL NOT NULL DEFAULT 0,
+                relevant_experience_years REAL NOT NULL DEFAULT 0,
+                match_score              INTEGER NOT NULL DEFAULT 0,
+                skills_matrix            TEXT NOT NULL DEFAULT "[]",
+                specialization_tags      TEXT NOT NULL DEFAULT "[]",
+                industry_remarks         TEXT NOT NULL DEFAULT "",
+                cv_file_name             TEXT,
+                ai_analysis              TEXT,
+                created_at               TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS candidate_notes (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                candidate_id INTEGER NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
+                author_email TEXT NOT NULL DEFAULT "Recruiter",
+                note_text    TEXT NOT NULL,
+                created_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        # Seed default requisitions only on first launch
+        count = conn.execute('SELECT COUNT(*) FROM requisitions').fetchone()[0]
+        if count == 0:
+            for r in SEED_REQUISITIONS:
+                conn.execute(
+                    'INSERT OR IGNORE INTO requisitions (id, job_title, location, target_domain, job_description_text) VALUES (?,?,?,?,?)',
+                    (r['id'], r['job_title'], r['location'], r['target_domain'], r['job_description_text'])
+                )
+        conn.commit()
+
+init_db()
+
+def row_to_requisition(row):
+    return {
+        'id': row['id'],
+        'job_title': row['job_title'],
+        'location': row['location'],
+        'target_domain': row['target_domain'],
+        'job_description_text': row['job_description_text'],
+        'created_at': row['created_at'],
+    }
+
+def row_to_candidate(row):
+    return {
+        'id': row['id'],
+        'requisition_id': row['requisition_id'],
+        'full_name': row['full_name'],
+        'email': row['email'],
+        'phone': row['phone'],
+        'passport_number': row['passport_number'],
+        'current_stage': row['current_stage'],
+        'total_experience_years': row['total_experience_years'],
+        'relevant_experience_years': row['relevant_experience_years'],
+        'match_score': row['match_score'],
+        'skills_matrix': json.loads(row['skills_matrix'] or '[]'),
+        'specialization_tags': json.loads(row['specialization_tags'] or '[]'),
+        'industry_remarks': row['industry_remarks'],
+        'cv_file_name': row['cv_file_name'],
+        'ai_analysis': json.loads(row['ai_analysis']) if row['ai_analysis'] else None,
+        'created_at': row['created_at'],
+    }
+
+# ── Requisition Endpoints ──────────────────────────────────────────────────────
+
+@app.route('/api/v1/requisitions', methods=['GET'])
+def list_requisitions():
+    with get_db() as conn:
+        rows = conn.execute('SELECT * FROM requisitions ORDER BY created_at DESC').fetchall()
+    return jsonify([row_to_requisition(r) for r in rows])
+
+@app.route('/api/v1/requisitions', methods=['POST'])
+def create_requisition():
+    data = request.get_json(force=True, silent=True) or {}
+    title   = str(data.get('job_title', '')).strip()
+    loc     = str(data.get('location', 'Not specified')).strip() or 'Not specified'
+    domain  = str(data.get('target_domain', 'Engineering Services')).strip()
+    jd_text = str(data.get('job_description_text', '')).strip()
+    if not title or not jd_text:
+        return jsonify({'error': 'job_title and job_description_text are required.'}), 400
+    with get_db() as conn:
+        cur = conn.execute(
+            'INSERT INTO requisitions (job_title, location, target_domain, job_description_text) VALUES (?,?,?,?)',
+            (title, loc, domain, jd_text)
+        )
+        conn.commit()
+        row = conn.execute('SELECT * FROM requisitions WHERE id=?', (cur.lastrowid,)).fetchone()
+    return jsonify(row_to_requisition(row)), 201
+
+@app.route('/api/v1/requisitions/<int:req_id>', methods=['DELETE'])
+def delete_requisition(req_id):
+    with get_db() as conn:
+        conn.execute('DELETE FROM candidates WHERE requisition_id=?', (req_id,))
+        conn.execute('DELETE FROM requisitions WHERE id=?', (req_id,))
+        conn.commit()
+    return jsonify({'success': True})
+
+# ── Candidate Endpoints ────────────────────────────────────────────────────────
+
+@app.route('/api/v1/candidates', methods=['GET'])
+def list_candidates():
+    req_id = request.args.get('req_id', type=int)
+    with get_db() as conn:
+        if req_id:
+            rows = conn.execute('SELECT * FROM candidates WHERE requisition_id=? ORDER BY match_score DESC, created_at DESC', (req_id,)).fetchall()
+        else:
+            rows = conn.execute('SELECT * FROM candidates ORDER BY match_score DESC, created_at DESC').fetchall()
+    return jsonify([row_to_candidate(r) for r in rows])
+
+@app.route('/api/v1/candidates', methods=['POST'])
+def upsert_candidate():
+    """Create or update a candidate. Matches on full_name+requisition_id for deduplication."""
+    data = request.get_json(force=True, silent=True) or {}
+    req_id    = data.get('requisition_id')
+    full_name = str(data.get('full_name', '')).strip()
+    if not req_id or not full_name:
+        return jsonify({'error': 'requisition_id and full_name are required.'}), 400
+
+    fields = {
+        'requisition_id':           req_id,
+        'full_name':                full_name,
+        'email':                    str(data.get('email', '')),
+        'phone':                    str(data.get('phone', '')),
+        'passport_number':          data.get('passport_number'),
+        'current_stage':            str(data.get('current_stage', 'Screening')),
+        'total_experience_years':   float(data.get('total_experience_years', 0)),
+        'relevant_experience_years':float(data.get('relevant_experience_years', 0)),
+        'match_score':              int(data.get('match_score', 0)),
+        'skills_matrix':            json.dumps(data.get('skills_matrix', [])),
+        'specialization_tags':      json.dumps(data.get('specialization_tags', [])),
+        'industry_remarks':         str(data.get('industry_remarks', '')),
+        'ai_analysis':              json.dumps(data.get('ai_analysis')) if data.get('ai_analysis') else None,
+    }
+
+    with get_db() as conn:
+        # Check for existing candidate by email, phone, passport, or name+req_id (smarter deduplication)
+        email_clean = str(data.get('email', '')).strip().lower()
+        phone_clean = str(data.get('phone', '')).strip()
+        passport_clean = str(data.get('passport_number', '')).strip() if data.get('passport_number') else ''
+        
+        query = '''
+            SELECT id FROM candidates WHERE 
+            (LOWER(email) = ? AND ? != '') OR
+            (phone = ? AND ? != '') OR
+            (passport_number = ? AND ? != '') OR
+            (requisition_id = ? AND LOWER(full_name) = LOWER(?))
+            LIMIT 1
+        '''
+        existing = conn.execute(
+            query,
+            (email_clean, email_clean, phone_clean, phone_clean, passport_clean, passport_clean, req_id, full_name)
+        ).fetchone()
+
+        if existing:
+            set_clause = ', '.join(f'{k}=?' for k in fields if k not in ('requisition_id', 'full_name'))
+            values = [v for k, v in fields.items() if k not in ('requisition_id', 'full_name')]
+            conn.execute(f'UPDATE candidates SET {set_clause} WHERE id=?', values + [existing['id']])
+            conn.commit()
+            row = conn.execute('SELECT * FROM candidates WHERE id=?', (existing['id'],)).fetchone()
+        else:
+            cols = ', '.join(fields.keys())
+            placeholders = ', '.join('?' for _ in fields)
+            cur = conn.execute(f'INSERT INTO candidates ({cols}) VALUES ({placeholders})', list(fields.values()))
+            conn.commit()
+            row = conn.execute('SELECT * FROM candidates WHERE id=?', (cur.lastrowid,)).fetchone()
+
+    return jsonify(row_to_candidate(row)), 201
+
+@app.route('/api/v1/candidates/<int:cand_id>', methods=['PUT'])
+def update_candidate(cand_id):
+    data = request.get_json(force=True, silent=True) or {}
+    allowed = {'current_stage', 'email', 'phone', 'passport_number', 'match_score',
+               'total_experience_years', 'relevant_experience_years',
+               'skills_matrix', 'specialization_tags', 'industry_remarks', 'cv_file_name', 'ai_analysis'}
+    updates = {}
+    for key in allowed:
+        if key in data:
+            if key in ('skills_matrix', 'specialization_tags'):
+                updates[key] = json.dumps(data[key])
+            elif key == 'ai_analysis':
+                updates[key] = json.dumps(data[key]) if data[key] else None
+            else:
+                updates[key] = data[key]
+    if not updates:
+        return jsonify({'error': 'No valid fields to update.'}), 400
+    with get_db() as conn:
+        set_clause = ', '.join(f'{k}=?' for k in updates)
+        conn.execute(f'UPDATE candidates SET {set_clause} WHERE id=?', list(updates.values()) + [cand_id])
+        conn.commit()
+        row = conn.execute('SELECT * FROM candidates WHERE id=?', (cand_id,)).fetchone()
+    if not row:
+        return jsonify({'error': 'Candidate not found.'}), 404
+    return jsonify(row_to_candidate(row))
+
+@app.route('/api/v1/candidates/<int:cand_id>', methods=['DELETE'])
+def delete_candidate(cand_id):
+    with get_db() as conn:
+        conn.execute('DELETE FROM candidates WHERE id=?', (cand_id,))
+        conn.commit()
+    return jsonify({'success': True})
+
+@app.route('/api/v1/candidates/clear', methods=['DELETE'])
+def clear_candidates():
+    req_id = request.args.get('req_id', type=int)
+    with get_db() as conn:
+        if req_id:
+            conn.execute('DELETE FROM candidates WHERE requisition_id=?', (req_id,))
+        else:
+            conn.execute('DELETE FROM candidates')
+        conn.commit()
+    return jsonify({'success': True})
+
+@app.route('/api/v1/candidates/<int:cand_id>/notes', methods=['GET'])
+def get_candidate_notes(cand_id):
+    with get_db() as conn:
+        rows = conn.execute('SELECT * FROM candidate_notes WHERE candidate_id = ? ORDER BY created_at DESC', (cand_id,)).fetchall()
+        return jsonify([dict(r) for r in rows])
+
+@app.route('/api/v1/candidates/<int:cand_id>/notes', methods=['POST'])
+def add_candidate_note(cand_id):
+    data = request.get_json(force=True, silent=True) or {}
+    note_text = data.get('note_text', '').strip()
+    author_email = data.get('author_email', 'Recruiter').strip()
+    if not note_text:
+        return jsonify({'error': 'Note text cannot be empty.'}), 400
+    with get_db() as conn:
+        cursor = conn.execute('INSERT INTO candidate_notes (candidate_id, author_email, note_text) VALUES (?, ?, ?)', (cand_id, author_email, note_text))
+        conn.commit()
+        note_id = cursor.lastrowid
+        row = conn.execute('SELECT * FROM candidate_notes WHERE id = ?', (note_id,)).fetchone()
+        return jsonify(dict(row)), 201
+
+@app.route('/api/v1/candidates/<int:cand_id>/notes/<int:note_id>', methods=['DELETE'])
+def delete_candidate_note(cand_id, note_id):
+    with get_db() as conn:
+        conn.execute('DELETE FROM candidate_notes WHERE id = ? AND candidate_id = ?', (note_id, cand_id))
+        conn.commit()
+        return jsonify({'success': True})
+
+# ── CV File Existence Check ────────────────────────────────────────────────────
+
+@app.route('/api/v1/cv/<path:filename>/exists', methods=['GET'])
+def cv_exists(filename):
+    path = os.path.join(UPLOAD_FOLDER, filename)
+    return jsonify({'exists': os.path.isfile(path)})
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 # Directory where uploaded CV files are permanently stored
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
@@ -166,8 +662,59 @@ TITLE_GENERIC_KEYWORDS = {
     'RESUME', 'CV', 'CURRICULUM', 'VITAE', 'CONTACT', 'PROFILE', 'OBJECTIVE',
     'SUMMARY', 'EDUCATION', 'EXPERIENCE', 'SKILLS', 'PROJECTS', 'CERTIFICATIONS',
     'ADDITIONAL', 'INFORMATION', 'DETAILS', 'LANGUAGES', 'HOBBIES', 'INTERESTS',
-    'PERSONAL', 'WORK', 'HISTORY', 'EMPLOYMENT', 'CAREER', 'QUALIFICATIONS'
+    'PERSONAL', 'WORK', 'HISTORY', 'EMPLOYMENT', 'CAREER', 'QUALIFICATIONS',
+    'TESTING', 'COMMISSIONING', 'SURVEYOR', 'EXECUTIVE', 'HEAD', 'ASSISTANT',
+    'SENIOR', 'JUNIOR', 'INTERN', 'TRAINEE', 'ASSOCIATE', 'PROJECT', 'SAFETY',
+    'QUALITY', 'CONTROL', 'ASSURANCE', 'QA', 'QC', 'HSE', 'EHS', 'NDT', 'PIPELINE',
+    'MECHANICAL', 'ELECTRICAL', 'CIVIL', 'INSTRUMENTATION', 'PROCESS', 'INDUSTRIAL'
 }
+
+def clean_candidate_name(name, file_hint=''):
+    if not name:
+        name = "Unknown Candidate"
+    name = str(name).strip()
+    
+    # 1. Remove common prefix labels
+    name = re.sub(r'^(name|full\s*name|candidate\s*name|applicant\s*name|candidate|applicant|resume\s*of|cv\s*of|curriculum\s*vitae\s*of|application\s*of)\s*[:\-–—|]\s*', '', name, flags=re.IGNORECASE).strip()
+    
+    # 2. If the name string contains a delimiter (e.g. "John Doe - Senior Engineer" or "Jane Smith | Piping Manager"), split and check parts
+    if re.search(r'\s*[-–—|:]\s*', name):
+        parts = re.split(r'\s*[-–—|:]\s*', name)
+        for part in parts:
+            clean_part = part.strip()
+            # Remove post-nominals from part
+            clean_part = re.sub(r'(\s*[,|\-–—]\s*(MBA|PMP|PHD|B\.?TECH|B\.?E|M\.?TECH|M\.?S|B\.?S|BSC|MSC|LEED|NEBOSH|IOSH|OSHA|API\s*\d+|CSWIP|RICS|CFM|FMP|P\.?E|C\.?ENG).*)+$', '', clean_part, flags=re.IGNORECASE).strip()
+            words = clean_part.split()
+            words_cleaned = [re.sub(r'[^\w]', '', w.upper()) for w in words]
+            if 1 <= len(words) <= 5 and not re.search(r'\d', clean_part) and not any(w in TITLE_GENERIC_KEYWORDS for w in words_cleaned):
+                name = clean_part.title()
+                break
+
+    # 3. Remove trailing post-nominals if attached
+    name = re.sub(r'(\s*[,|\-–—]\s*(MBA|PMP|PHD|B\.?TECH|B\.?E|M\.?TECH|M\.?S|B\.?S|BSC|MSC|LEED|NEBOSH|IOSH|OSHA|API\s*\d+|CSWIP|RICS|CFM|FMP|P\.?E|C\.?ENG).*)+$', '', name, flags=re.IGNORECASE).strip()
+    words_cleaned = [re.sub(r'[^\w]', '', w.upper()) for w in name.split()]
+    
+    # 4. If the resulting name is still invalid or contains job titles, try fallback from file_hint
+    if not name or name.upper() in ["UNKNOWN CANDIDATE", "UNKNOWN", "", "N/A", "NONE", "NULL", "NAME"] or any(w in TITLE_GENERIC_KEYWORDS for w in words_cleaned):
+        if file_hint:
+            stem = os.path.splitext(file_hint)[0]
+            stem = re.sub(r'^[0-9a-f]{8}_', '', stem, flags=re.IGNORECASE)
+            stem = re.sub(r'(?i)(_cv|_resume|_application|\d{4,}).*$', '', stem)
+            if re.search(r'[-–—|,|_]', stem):
+                parts = re.split(r'[-–—|,|_]', stem)
+                for p in parts:
+                    p_clean = p.strip()
+                    p_words = p_clean.split()
+                    p_words_upper = [re.sub(r'[^\w]', '', w.upper()) for w in p_words]
+                    if 1 <= len(p_words) <= 5 and not re.search(r'\d', p_clean) and not any(w in TITLE_GENERIC_KEYWORDS for w in p_words_upper):
+                        return p_clean.title()
+            stem = re.sub(r'[_\-]+', ' ', stem).strip()
+            stem_words = stem.split()
+            stem_words_cleaned = [re.sub(r'[^\w]', '', w.upper()) for w in stem_words]
+            if 1 <= len(stem_words) <= 5 and not re.search(r'\d', stem) and not any(w in TITLE_GENERIC_KEYWORDS for w in stem_words_cleaned):
+                return stem.title()
+        return "Unknown Candidate"
+    return name.title() if name else "Unknown Candidate"
 
 def extract_contacts(text, file_hint=''):
     """Scan and parse candidate basic info using regular expressions.
@@ -186,53 +733,39 @@ def extract_contacts(text, file_hint=''):
     phone = phone_match.group(0) if phone_match else "N/A"
     
     # Try to parse candidate name from the first 8 non-empty lines.
-    # Rules:
-    #   - 2 to 5 words (allow titles like "Dr. John Smith")
-    #   - No digits
-    #   - No email @
-    #   - Not a known section-header word (blocklist)
-    #   - Does not contain common job titles or placeholder keywords
     lines = [line.strip() for line in text.split('\n') if line.strip()]
     full_name = None
     for line in lines[:8]:
-        words = line.split()
-        if not (2 <= len(words) <= 5):
+        line = re.sub(r'^(name|full\s*name|candidate\s*name|applicant\s*name|candidate|applicant|resume\s*of|cv\s*of|curriculum\s*vitae\s*of)\s*[:\-–—|]\s*', '', line, flags=re.IGNORECASE).strip()
+        line = re.sub(r'^(NAME|Full Name|Candidate Name|Applicant Name|Name)\s*[:\-]\s*', '', line, flags=re.IGNORECASE).strip()
+        if not line:
+            continue
+        # Check if line has a delimiter like John Doe - Engineer
+        if re.search(r'\s*[-–—|:]\s*', line):
+            parts = re.split(r'\s*[-–—|:]\s*', line)
+            line = parts[0].strip()
+        words = re.split(r'[\s._-]+', line)
+        words = [w for w in words if w]
+        if not (1 <= len(words) <= 5):
             continue
         if re.search(r'\d', line):
             continue
         if '@' in line:
             continue
-        # Reject lines that are entirely punctuation / symbols
         if re.fullmatch(r'[^\w\s]+', line):
             continue
-        # Reject known section headers (case-insensitive exact match)
         if line.upper().strip() in NAME_BLOCKLIST:
             continue
-        # Reject lines containing any forbidden job title or generic placeholder keywords
         words_cleaned = [re.sub(r'[^\w]', '', w.upper()) for w in words]
         if any(w in TITLE_GENERIC_KEYWORDS for w in words_cleaned):
             continue
-        # Accept: looks like a proper name
         full_name = line
         break
 
-    # Fallback 1: derive name from the uploaded filename
-    # e.g. "John_Smith_CV.pdf" -> "John Smith"
     if full_name is None and file_hint:
-        stem = os.path.splitext(file_hint)[0]          # strip extension if present
-        stem = re.sub(r'(?i)(_cv|_resume|_application|\d{4,}).*$', '', stem)
-        stem = re.sub(r'[_\-]+', ' ', stem).strip()
-        stem_words = stem.split()
-        # Clean any generic/title words from the filename as well
-        stem_words_cleaned = [re.sub(r'[^\w]', '', w.upper()) for w in stem_words]
-        if 2 <= len(stem_words) <= 5 and not re.search(r'\d', stem) and not any(w in TITLE_GENERIC_KEYWORDS for w in stem_words_cleaned):
-            full_name = stem.title()
-
-    # Fallback 2: generic placeholder
-    if full_name is None:
-        full_name = "Unknown Candidate"
+        full_name = clean_candidate_name("", file_hint=file_hint)
             
-    return full_name, email, phone
+    return clean_candidate_name(full_name, file_hint=file_hint), email, phone
 
 def parse_experience_years(text):
     """Estimate total experience years from textual descriptions"""
@@ -436,6 +969,54 @@ def score_candidate_data(candidate_text, target_domain='', file_hint='', jd_text
                 f"vs required {target_domain}. {total_exp:.1f} yrs total experience."
             )
 
+    # 5. AI Precision ATS Parsing & Semantic Enrichment (Google Gemini)
+    ai_result = analyze_candidate_with_ai(candidate_text, jd_text, target_domain, match_score)
+    ai_analysis_payload = None
+    if ai_result and isinstance(ai_result, dict):
+        # 1. Enforce AI cleaned full_name (prevents headers like PERSONAL DETAILS or trailing MBA/PMP)
+        ai_name = ai_result.get("full_name")
+        if ai_name and str(ai_name).strip() not in ["Unknown Candidate", "UNKNOWN", ""]:
+            full_name = str(ai_name).strip()
+        
+        # 2. Enforce AI extracted email and phone if found
+        if ai_result.get("email") and str(ai_result.get("email")).strip():
+            email = str(ai_result["email"]).strip()
+        if ai_result.get("phone") and str(ai_result.get("phone")).strip():
+            phone = str(ai_result["phone"]).strip()
+
+        # 3. Use mathematically calculated timeline experience from AI
+        if isinstance(ai_result.get("total_experience_years"), (int, float)):
+            total_exp = round(float(ai_result["total_experience_years"]), 1)
+        if isinstance(ai_result.get("relevant_experience_years"), (int, float)):
+            relevant_exp = round(float(ai_result["relevant_experience_years"]), 1)
+
+        # 4. Use precision AI match_score (blended 20% algorithmic + 80% AI semantic for maximum accuracy)
+        if isinstance(ai_result.get("match_score"), (int, float)):
+            match_score = int(round(0.2 * match_score + 0.8 * float(ai_result["match_score"])))
+            match_score = max(0, min(100, match_score))
+
+        # 5. Merge or use AI skills matrix and specialization tags
+        if isinstance(ai_result.get("skills_matrix"), list) and len(ai_result["skills_matrix"]) > 0:
+            skills_matrix = [str(s).upper() for s in ai_result["skills_matrix"]]
+        if isinstance(ai_result.get("specialization_tags"), list) and len(ai_result["specialization_tags"]) > 0:
+            specialization_tags = [str(t) for t in ai_result["specialization_tags"]]
+
+        # 6. Use AI industry remarks
+        if ai_result.get("industry_remarks"):
+            remarks = str(ai_result["industry_remarks"])
+
+        # 7. Extract interview and summary report for frontend AI panel
+        ai_analysis_payload = ai_result.get("ai_analysis")
+        if not ai_analysis_payload or not isinstance(ai_analysis_payload, dict):
+            ai_analysis_payload = {
+                "summary": ai_result.get("industry_remarks", ""),
+                "strengths": ai_result.get("strengths", []),
+                "gaps": ai_result.get("gaps", []),
+                "interview_questions": ai_result.get("interview_questions", [])
+            }
+
+    full_name = clean_candidate_name(full_name, file_hint=file_hint)
+
     return {
         "full_name": full_name,
         "email": email,
@@ -445,7 +1026,8 @@ def score_candidate_data(candidate_text, target_domain='', file_hint='', jd_text
         "match_score": match_score,
         "skills_matrix": skills_matrix if skills_matrix else ["GENERAL TECHNICAL"],
         "specialization_tags": specialization_tags,
-        "industry_remarks": remarks
+        "industry_remarks": remarks,
+        "ai_analysis": ai_analysis_payload
     }
 
 @app.route('/api/v1/screen-candidate', methods=['POST'])
@@ -968,6 +1550,7 @@ def gdrive_import():
     folder_url = data['folder_url'].strip()
     target_domain = data['target_domain']
     requisition_id = data['requisition_id']
+    jd_text = data.get('job_description_text', '')
     
     # Check for dummy or test folder URLs/IDs
     is_dummy = (
@@ -1024,7 +1607,7 @@ def gdrive_import():
             file_size = os.path.getsize(file_path)
             
             raw_text = extract_text_from_file(file_path)
-            scored_data = score_candidate_data(raw_text, target_domain, file_hint=file_name)
+            scored_data = score_candidate_data(raw_text, target_domain, file_hint=file_name, jd_text=jd_text)
             
             candidates.append({
                 "fileName": file_name,
