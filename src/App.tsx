@@ -60,10 +60,7 @@ function App() {
     setAuthUser(null);
   };
 
-  // Show login page if not authenticated
-  if (!authToken || !authUser) {
-    return <LoginPage onLogin={handleLogin} />;
-  }
+  // Hook definitions completed, authentication check moved below to satisfy Hook order rules
   // ─────────────────────────────────────────────────────────────
 
   const [activeTab, setActiveTab] = useState<'dashboard' | 'screener' | 'directory' | 'requisitions' | 'users'>('dashboard');
@@ -341,6 +338,11 @@ function App() {
   }, {} as Record<HiringStage, number>);
 
   const highMatchCount = activeCandidates.filter(c => c.match_score >= 80).length;
+
+  // Show login page if not authenticated
+  if (!authToken || !authUser) {
+    return <LoginPage onLogin={handleLogin} />;
+  }
 
   return (
     <div 

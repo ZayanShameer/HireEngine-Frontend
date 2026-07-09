@@ -38,7 +38,7 @@ Execute this extraction and matching logic strictly according to the rules below
 
 ### 1. NAME EXTRACTION RULES
 - Locate the candidate's absolute legal full name from the top header lines of the document text.
-- STRIP and IGNORE all trailing credentials, post-nominal titles, or certifications (e.g., "MBA", "PMP", "Ph.D", "SEC Approved", "P.E", "C.Eng").
+- STRIP and IGNORE all trailing credentials, post-nominal titles, or certifications (e.g., "MBA", "PMP", "Ph.D", "P.E", "C.Eng").
 - STRIP and IGNORE prefix labels such as "NAME :", "Name:", "Full Name:", "Candidate Name:", "Applicant Name:", "Resume of:", "Curriculum Vitae of:", "CV of:", or "Application of:".
 - CRITICAL DELIMITER RULE: If a header or filename is formatted with a dash or pipe like "<Candidate Name> - <Job Title>" or "John Doe | Senior Pipeline Engineer", you MUST extract ONLY the person's name before the delimiter ("John Doe"). Never include job titles like "Engineer", "Manager", "Consultant", "Director", or "Specialist" in the full_name field.
 - BLOCKLIST CRITICAL ERROR: Under no circumstances use standard resume structural section headers (such as "PERSONAL DETAILS", "PROFESSIONAL SUMMARY", "CAREER SUMMARY", "RESUME", or "EDUCATION") as the candidate's name. If no explicit person's name is identifiable, fallback to "Unknown Candidate".
@@ -53,7 +53,15 @@ Execute this extraction and matching logic strictly according to the rules below
 - Avoid naïve keyword counting flags. Understand deep technical semantics. For example: If a candidate mentions "Anode Furnaces" or "BMS strategies", recognize that contextually maps to Industrial Environments or Controls without needing a verbatim string match.
 - Ensure that if a candidate is a phenomenal expert in an unrelated sub-domain (e.g., a pure High-Voltage Substation engineer being evaluated for an Industrial Automation/PLC software role), their match score drops significantly to accurately reflect the functional profile pivot required.
 
-### 4. OUTPUT SCHEMA CONSTRAINTS
+### 4. DYNAMIC MANDATORY REQUIREMENTS EXTRACTION & VERIFICATION (HARD STOP RULE)
+- Read the provided Job Description to dynamically identify any requirements that are explicitly labeled as "MANDATORY", "REQUIRED", or similar absolute constraints (such as specific mandatory companies, required certifications, or mandatory geographic locations).
+- Do NOT hardcode specific names (like "Aramco" or "SEC") in your parsing logic; instead, extract them dynamically from the active job description.
+- For each identified mandatory/required rule, cross-reference the candidate's CV text to verify if they satisfy this requirement.
+- Set the "eligible" output field to true if the candidate satisfies all identified mandatory/required rules, or if no mandatory/required rules are found in the Job Description.
+- HARD STOP RULE: If the candidate completely lacks any of the identified mandatory/required requirements, you must set "eligible" to false, cap the "match_score" at a maximum of 40% (or less if the candidate naturally scores lower), and state exactly which mandatory requirement was missing in the "justification" field.
+- If the candidate is eligible, set "justification" to null.
+
+### 5. OUTPUT SCHEMA CONSTRAINTS
 Your response must be returned strictly as a clean, single, valid JSON object with no markdown code blocks, no backticks, and no trailing prose. Match this exact JSON typography:
 
 {{
@@ -65,10 +73,12 @@ Your response must be returned strictly as a clean, single, valid JSON object wi
   "match_score": Number (Integer from 0 to 100),
   "skills_matrix": ["String (Cleaned uppercase tool/tech names found)"],
   "specialization_tags": ["String (Protocol/Domain tags like 'IEC 61850', 'SCADA', 'Modbus')"],
-  "industry_remarks": "String (A concise 2-3 sentence overview detailing structural alignment, tool proficiencies, or critical domain/timeline experience gaps)"
+  "industry_remarks": "String (A concise 2-3 sentence overview detailing structural alignment, tool proficiencies, or critical domain/timeline experience gaps)",
+  "eligible": Boolean,
+  "justification": "String or null (If eligible is false, explain exactly which mandatory requirement was missing)"
 }}
 
-### 5. INPUT PARAMETERS
+### 6. INPUT PARAMETERS
 Target Domain: {target_domain}
 Job Description: {jd_preview}
 

@@ -51,6 +51,8 @@ export interface Candidate {
     gaps?: string[];
     interview_questions?: string[];
   };
+  eligible?: boolean;
+  veto_reason?: string | null;
   created_at: string; // ISO Timestamp
 }
 

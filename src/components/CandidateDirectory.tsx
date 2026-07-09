@@ -3,7 +3,7 @@ import {
   Search, SlidersHorizontal, Table, LayoutDashboard, User, Mail, 
   Phone, Briefcase, Award, X, Trash2, Shield, FileUp, Users, Download,
   Sparkles, Loader2, Zap, MessageSquare, Eye, EyeOff, Send, Clock,
-  CheckSquare, Square, Check
+  CheckSquare, Square, Check, AlertCircle
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Candidate, HiringStage, TargetDomain, Requisition, CandidateNote } from '../types';
@@ -46,11 +46,16 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
   const [newNoteText, setNewNoteText] = useState('');
   const [loadingNotes, setLoadingNotes] = useState(false);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryBullets, setSummaryBullets] = useState<string[] | null>(null);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!selectedCandidate) {
       setNotes([]);
       setShowPreview(false);
+      setSummaryBullets(null);
+      setSummaryError(null);
       return;
     }
     setShowPreview(false);
@@ -613,7 +618,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
         <div className={viewMode === 'kanban' ? 'flex-1 min-h-0 overflow-hidden pt-1' : 'flex-1 overflow-y-auto min-h-0 pr-1 pt-3 pb-6 pl-1'}>
           {viewMode === 'list' ? (
             /* LIST VIEW GRID */
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '24px' }}>
               {filteredCandidates.map(candidate => (
                 <div
                   key={candidate.id}
@@ -636,7 +641,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                         )}
                       </button>
 
-                      <div className="flex flex-col min-w-0 flex-1 mr-3">
+                      <div className="flex flex-col min-w-0 flex-1 mr-3" style={{ minWidth: 0, overflow: 'hidden' }}>
                         <h4 className="candidate-card-title">
                           {candidate.full_name}
                         </h4>
@@ -646,6 +651,11 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                       </div>
 
                       <div className="flex items-center gap-2 flex-shrink-0">
+                        {candidate.eligible === false && (
+                          <span className="text-[10px] bg-rose-500/10 border border-rose-500/30 text-rose-500 font-black px-2 py-0.5 rounded-full flex items-center gap-1 animate-pulse" title={candidate.veto_reason || "Ineligible"}>
+                            VETOED
+                          </span>
+                        )}
                         {candidate.ai_analysis && (
                           <span className="text-[10px] bg-purple-500/10 border border-purple-500/30 text-purple-600 font-bold px-2 py-0.5 rounded-full flex items-center gap-1" title="Analyzed by Google Gemini AI">
                             <Sparkles className="h-3 w-3" /> AI
@@ -782,11 +792,16 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                                   <Square className="h-3.5 w-3.5 text-slate-300 hover:text-slate-500" />
                                 )}
                               </button>
-                              <span className="text-sm font-bold text-[var(--text-primary)] break-words min-w-0" title={candidate.full_name}>
+                              <span className="text-sm font-bold text-[var(--text-primary)] truncate block min-w-0" title={candidate.full_name}>
                                 {candidate.full_name}
                               </span>
                             </div>
                             <div className="flex items-center gap-1.5 flex-shrink-0">
+                              {candidate.eligible === false && (
+                                <span className="text-[10px] bg-rose-500/10 border border-rose-500/30 text-rose-500 font-black px-1.5 py-0.5 rounded-full" title={candidate.veto_reason || "Ineligible"}>
+                                  VETO
+                                </span>
+                              )}
                               {candidate.ai_analysis && (
                                 <span className="text-[10px] bg-purple-500/10 border border-purple-500/30 text-purple-600 font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5" title="Analyzed by Google Gemini AI">
                                   <Sparkles className="h-2.5 w-2.5" />
@@ -858,6 +873,102 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
 
             {/* Scrollable Content */}
             <div className="p-6 flex-1 overflow-y-auto flex flex-col gap-6">
+
+              {selectedCandidate.eligible === false && (
+                <div className="bg-rose-500/10 border border-rose-500/30 rounded-[var(--radius-lg)] p-4.5 flex items-start gap-3.5 text-rose-300 animate-fade-in">
+                  <AlertCircle className="h-5.5 w-5.5 text-rose-500 flex-shrink-0 mt-0.5" />
+                  <div className="flex flex-col gap-1.5 min-w-0">
+                    <span className="text-xs font-black text-rose-400 uppercase tracking-wider">HARD VETO FAILURE: Candidate Ineligible</span>
+                    <p className="text-xs leading-relaxed text-slate-400 font-medium">
+                      This candidate does not satisfy one or more mandatory requirements:
+                    </p>
+                    <div className="text-sm font-bold text-rose-300 bg-rose-500/15 border border-rose-500/25 px-3 py-2 rounded-md font-mono mt-1 leading-normal">
+                      {selectedCandidate.veto_reason || 'Missing mandatory qualification.'}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ✨ Gemini Instant Summary Card */}
+              <div className="rounded-[var(--radius-lg)] border overflow-hidden" style={{ background: 'linear-gradient(135deg, #120324 0%, #1e093a 50%, #110526 100%)', borderColor: 'rgba(167, 139, 250, 0.25)' }}>
+                {/* Header */}
+                <div className="flex items-center justify-between px-5 py-3.5" style={{ borderBottom: '1px solid rgba(167, 139, 250, 0.15)' }}>
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-gradient-to-br from-indigo-500 to-purple-600 shadow-inner">
+                      <Sparkles className="h-3.5 w-3.5 text-white" />
+                    </div>
+                    <div>
+                      <span className="text-xs font-black text-white tracking-wider uppercase">Gemini Instant Summary</span>
+                      <p className="text-[10px]" style={{ color: 'rgba(196, 181, 253, 0.7)', marginTop: '1px' }}>AI Candidate Digest</p>
+                    </div>
+                  </div>
+                  <button
+                    id="instant-summary-btn"
+                    onClick={async () => {
+                      setSummaryLoading(true);
+                      setSummaryBullets(null);
+                      setSummaryError(null);
+                      try {
+                        const res = await fetch(`http://localhost:5000/api/v1/candidates/${selectedCandidate.id}/instant-summary`, { method: 'POST' });
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data.error || 'Failed to generate summary.');
+                        setSummaryBullets(data.bullets || []);
+                      } catch (err: any) {
+                        setSummaryError(err.message || 'Unknown error occurred.');
+                      } finally {
+                        setSummaryLoading(false);
+                      }
+                    }}
+                    disabled={summaryLoading}
+                    className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{
+                      background: summaryBullets ? 'rgba(167, 139, 250, 0.12)' : 'linear-gradient(135deg, #7c3aed, #4f46e5)',
+                      color: summaryBullets ? 'rgba(216, 180, 254, 0.95)' : '#fff',
+                      border: summaryBullets ? '1px solid rgba(167, 139, 250, 0.25)' : 'none',
+                    }}
+                  >
+                    {summaryLoading ? (
+                      <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Analyzing...</>
+                    ) : summaryBullets ? (
+                      <><Sparkles className="h-3.5 w-3.5" /> Regenerate</>
+                    ) : (
+                      <><Zap className="h-3.5 w-3.5" /> Digest Resume</>
+                    )}
+                  </button>
+                </div>
+
+                {/* Body */}
+                <div className="px-5 py-4">
+                  {!summaryBullets && !summaryLoading && !summaryError && (
+                    <p className="text-xs text-center py-2" style={{ color: 'rgba(196, 181, 253, 0.6)' }}>
+                      Click &ldquo;Digest Resume&rdquo; to query Gemini and generate a 3-bullet instant snapshot.
+                    </p>
+                  )}
+                  {summaryLoading && (
+                    <div className="flex flex-col gap-2.5 animate-pulse py-1">
+                      <div className="h-3.5 rounded-full" style={{ background: 'rgba(167, 139, 250, 0.15)', width: '90%' }} />
+                      <div className="h-3.5 rounded-full" style={{ background: 'rgba(167, 139, 250, 0.15)', width: '100%' }} />
+                      <div className="h-3.5 rounded-full" style={{ background: 'rgba(167, 139, 250, 0.15)', width: '75%' }} />
+                    </div>
+                  )}
+                  {summaryError && (
+                    <div className="flex items-start gap-2 text-xs rounded-lg px-3.5 py-2.5" style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.25)', color: '#fca5a5' }}>
+                      <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                      <span>{summaryError}</span>
+                    </div>
+                  )}
+                  {summaryBullets && summaryBullets.length > 0 && (
+                    <ul className="flex flex-col gap-3">
+                      {summaryBullets.map((bullet, i) => (
+                        <li key={i} className="flex items-start gap-2.5 text-sm animate-fade-in" style={{ animationDelay: `${i * 100}ms` }}>
+                          <span className="mt-0.5 w-4.5 h-4.5 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] font-extrabold" style={{ background: 'rgba(167, 139, 250, 0.2)', color: '#d8b4fe', border: '1px solid rgba(167, 139, 250, 0.3)' }}>{i + 1}</span>
+                          <span style={{ color: 'rgba(233, 221, 255, 0.95)', lineHeight: '1.55' }}>{bullet.replace(/^[•\-\*]\s*/, '')}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
               
               {/* Score Indicator */}
               <div className="bg-black/[0.015] border border-[var(--border-light)] rounded-[var(--radius-lg)] p-6 flex items-center justify-between gap-4">

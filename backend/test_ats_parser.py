@@ -12,9 +12,9 @@ logger = logging.getLogger("ATS_TEST_SUITE")
 automationTestCaseSuite = [
     {
         "testId": "TC-001-HIGH",
-        "candidateName": "ANANDA BALAJI. K",
-        "filePattern": "*ANANDA BALAJI K*.pdf",
-        "expectedDomain": "Engineering Services",
+        "candidateName": "K MUZZAMIL HUQ",
+        "filePattern": "*K MUZZAMIL HUQ*.pdf",
+        "expectedDomain": "Testing & Commissioning Engineering",
         "expectedMinScore": 55,
         "expectedEligibility": True
     },
@@ -22,15 +22,17 @@ automationTestCaseSuite = [
         "testId": "TC-002-EDGE",
         "candidateName": "Mahmoud Mohanad Mahmoud",
         "filePattern": "*MAHMOUD MOHANAD MAHMOUD*.pdf",
-        "expectedMinYearsExp": 5.0,  # Checks if AI fixed the 3y military string bug
-        "expectedMinScore": 45
+        "expectedMinYearsExp": 5.0,
+        "expectedMinScore": 45,
+        "expectedEligibility": True
     },
     {
         "testId": "TC-003-LOW",
-        "candidateName": "Andrew Mutale Menso",
-        "filePattern": "*ANDREW MUTALE MENSO*.pdf",
-        "expectedMaxScore": 20,
-        "expectedEligibility": False
+        "candidateName": "YOUNAS ASADULLAH",
+        "filePattern": "*YOUNAS ASADULLAH*.pdf",
+        "expectedMaxScore": 40,
+        "expectedEligibility": False,
+        "customJd": "We are seeking a Senior Testing & Commissioning Electrical Engineer. MANDATORY REQUIREMENT: Candidate MUST have a PMP Certification. Any candidate without a PMP certification is strictly not eligible."
     }
 ]
 
@@ -78,7 +80,7 @@ def run_test_suite():
 
         # Set up realistic Job Description for Testing & Commissioning / Substation Engineering
         target_domain = tc.get("expectedDomain", "Testing & Commissioning Engineering")
-        jd_text = (
+        jd_text = tc.get("customJd") or (
             "We are seeking a Senior Testing & Commissioning Electrical Engineer with extensive experience "
             "in switchgear, GIS substations, high-voltage equipment testing, protection schemes, and SCADA systems. "
             "Candidates must have proven site commissioning leadership and strong electrical engineering credentials."
@@ -93,7 +95,7 @@ def run_test_suite():
         actual_total_exp = result.get("total_experience_years", 0.0)
         actual_rel_exp = result.get("relevant_experience_years", 0.0)
         remarks = result.get("industry_remarks", "")
-        is_eligible = actual_score >= 50
+        is_eligible = result.get("eligible", True)
 
         # Assertions & Verification
         failures = []

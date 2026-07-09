@@ -10,7 +10,12 @@ import hashlib
 import hmac
 import time
 import base64
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from ai_service import analyze_candidate_with_ai
+
+# Module-level logger (used by helper functions outside route handlers)
+_app_logger = logging.getLogger('hireengine.app')
 
 # Optional libraries for PDF and DOCX parsing
 try:
@@ -258,12 +263,13 @@ def init_db():
     with get_db() as conn:
         conn.execute('''
             CREATE TABLE IF NOT EXISTS requisitions (
-                id           INTEGER PRIMARY KEY,
-                job_title    TEXT NOT NULL,
-                location     TEXT NOT NULL DEFAULT "Not specified",
-                target_domain TEXT NOT NULL,
+                id                   INTEGER PRIMARY KEY,
+                job_title            TEXT NOT NULL,
+                location             TEXT NOT NULL DEFAULT "Not specified",
+                target_domain        TEXT NOT NULL,
                 job_description_text TEXT NOT NULL,
-                created_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                screening_rules      TEXT,
+                created_at           TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         conn.execute('''
@@ -283,6 +289,8 @@ def init_db():
                 industry_remarks         TEXT NOT NULL DEFAULT "",
                 cv_file_name             TEXT,
                 ai_analysis              TEXT,
+                eligible                 INTEGER NOT NULL DEFAULT 1,
+                veto_reason              TEXT,
                 created_at               TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -295,6 +303,16 @@ def init_db():
                 created_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        # ── Backward-compatible migrations for existing live databases ─────────
+        for migration in [
+            'ALTER TABLE requisitions ADD COLUMN screening_rules TEXT',
+            'ALTER TABLE candidates ADD COLUMN eligible INTEGER NOT NULL DEFAULT 1',
+            'ALTER TABLE candidates ADD COLUMN veto_reason TEXT',
+        ]:
+            try:
+                conn.execute(migration)
+            except Exception:
+                pass  # Column already exists — safe to ignore
         # Seed default requisitions only on first launch
         count = conn.execute('SELECT COUNT(*) FROM requisitions').fetchone()[0]
         if count == 0:
@@ -308,16 +326,19 @@ def init_db():
 init_db()
 
 def row_to_requisition(row):
+    raw_rules = row['screening_rules'] if 'screening_rules' in row.keys() else None
     return {
         'id': row['id'],
         'job_title': row['job_title'],
         'location': row['location'],
         'target_domain': row['target_domain'],
         'job_description_text': row['job_description_text'],
+        'screening_rules': json.loads(raw_rules) if raw_rules else None,
         'created_at': row['created_at'],
     }
 
 def row_to_candidate(row):
+    keys = row.keys()
     return {
         'id': row['id'],
         'requisition_id': row['requisition_id'],
@@ -334,6 +355,8 @@ def row_to_candidate(row):
         'industry_remarks': row['industry_remarks'],
         'cv_file_name': row['cv_file_name'],
         'ai_analysis': json.loads(row['ai_analysis']) if row['ai_analysis'] else None,
+        'eligible': bool(row['eligible']) if 'eligible' in keys else True,
+        'veto_reason': row['veto_reason'] if 'veto_reason' in keys else None,
         'created_at': row['created_at'],
     }
 
@@ -352,16 +375,32 @@ def create_requisition():
     loc     = str(data.get('location', 'Not specified')).strip() or 'Not specified'
     domain  = str(data.get('target_domain', 'Engineering Services')).strip()
     jd_text = str(data.get('job_description_text', '')).strip()
+    rules   = data.get('screening_rules')  # Optional dict or None
     if not title or not jd_text:
         return jsonify({'error': 'job_title and job_description_text are required.'}), 400
+    rules_json = json.dumps(rules) if rules and isinstance(rules, dict) else None
     with get_db() as conn:
         cur = conn.execute(
-            'INSERT INTO requisitions (job_title, location, target_domain, job_description_text) VALUES (?,?,?,?)',
-            (title, loc, domain, jd_text)
+            'INSERT INTO requisitions (job_title, location, target_domain, job_description_text, screening_rules) VALUES (?,?,?,?,?)',
+            (title, loc, domain, jd_text, rules_json)
         )
         conn.commit()
         row = conn.execute('SELECT * FROM requisitions WHERE id=?', (cur.lastrowid,)).fetchone()
     return jsonify(row_to_requisition(row)), 201
+
+@app.route('/api/v1/requisitions/<int:req_id>/screening-rules', methods=['PUT'])
+def update_screening_rules(req_id):
+    """Update (or clear) the screening rules for a requisition without recreating it."""
+    data = request.get_json(force=True, silent=True) or {}
+    rules = data.get('screening_rules')  # None to clear, dict to set
+    rules_json = json.dumps(rules) if rules and isinstance(rules, dict) else None
+    with get_db() as conn:
+        conn.execute('UPDATE requisitions SET screening_rules=? WHERE id=?', (rules_json, req_id))
+        conn.commit()
+        row = conn.execute('SELECT * FROM requisitions WHERE id=?', (req_id,)).fetchone()
+    if not row:
+        return jsonify({'error': 'Requisition not found.'}), 404
+    return jsonify(row_to_requisition(row))
 
 @app.route('/api/v1/requisitions/<int:req_id>', methods=['DELETE'])
 def delete_requisition(req_id):
@@ -406,6 +445,8 @@ def upsert_candidate():
         'specialization_tags':      json.dumps(data.get('specialization_tags', [])),
         'industry_remarks':         str(data.get('industry_remarks', '')),
         'ai_analysis':              json.dumps(data.get('ai_analysis')) if data.get('ai_analysis') else None,
+        'eligible':                 1 if data.get('eligible', True) else 0,
+        'veto_reason':              data.get('veto_reason'),
     }
 
     with get_db() as conn:
@@ -447,7 +488,8 @@ def update_candidate(cand_id):
     data = request.get_json(force=True, silent=True) or {}
     allowed = {'current_stage', 'email', 'phone', 'passport_number', 'match_score',
                'total_experience_years', 'relevant_experience_years',
-               'skills_matrix', 'specialization_tags', 'industry_remarks', 'cv_file_name', 'ai_analysis'}
+               'skills_matrix', 'specialization_tags', 'industry_remarks', 'cv_file_name',
+               'ai_analysis', 'eligible', 'veto_reason'}
     updates = {}
     for key in allowed:
         if key in data:
@@ -455,6 +497,8 @@ def update_candidate(cand_id):
                 updates[key] = json.dumps(data[key])
             elif key == 'ai_analysis':
                 updates[key] = json.dumps(data[key]) if data[key] else None
+            elif key == 'eligible':
+                updates[key] = 1 if data[key] else 0
             else:
                 updates[key] = data[key]
     if not updates:
@@ -512,6 +556,123 @@ def delete_candidate_note(cand_id, note_id):
         conn.execute('DELETE FROM candidate_notes WHERE id = ? AND candidate_id = ?', (note_id, cand_id))
         conn.commit()
         return jsonify({'success': True})
+
+# ── Instant AI Summary Route ───────────────────────────────────────────────────
+
+@app.route('/api/v1/candidates/<int:cand_id>/instant-summary', methods=['POST'])
+def instant_summary(cand_id):
+    """
+    Generate a concise 3-bullet Gemini summary for a candidate.
+    Reads their stored CV file for raw text, then calls the Gemini API.
+    Returns: { bullets: [str, str, str] }
+    """
+    import logging
+    from dotenv import load_dotenv
+    load_dotenv()
+    logger = logging.getLogger(__name__)
+
+    # 1. Fetch candidate record
+    with get_db() as conn:
+        row = conn.execute('SELECT * FROM candidates WHERE id=?', (cand_id,)).fetchone()
+    if not row:
+        return jsonify({'error': 'Candidate not found.'}), 404
+
+    candidate = row_to_candidate(row)
+
+    # 2. Try to get CV raw text from file
+    cv_text = ''
+    cv_file = candidate.get('cv_file_name')
+    if cv_file:
+        cv_path = os.path.join(UPLOAD_FOLDER, cv_file)
+        if os.path.isfile(cv_path):
+            try:
+                cv_text = extract_text_from_file(cv_path)
+            except Exception as e:
+                logger.warning(f'Could not extract CV text for summary: {e}')
+
+    # 3. Fall back to stored profile data if no CV file
+    if not cv_text.strip():
+        skills_str = ', '.join(candidate.get('skills_matrix', []))
+        cv_text = (
+            f"Name: {candidate['full_name']}\n"
+            f"Experience: {candidate['total_experience_years']} years total, "
+            f"{candidate['relevant_experience_years']} years relevant\n"
+            f"Skills: {skills_str}\n"
+            f"Remarks: {candidate.get('industry_remarks', '')}"
+        )
+
+    # 4. Call Gemini API
+    api_key = os.getenv('GEMINI_API_KEY', '').strip()
+    if not api_key or api_key == 'YOUR_GEMINI_API_KEY_HERE':
+        return jsonify({'error': 'GEMINI_API_KEY not configured on the server.'}), 503
+
+    try:
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(api_key=api_key)
+
+        prompt = (
+            "You are an expert technical recruiter. Read the following candidate resume text carefully.\n\n"
+            "Your task is to produce exactly 3 concise bullet points (each starting with the bullet character) "
+            "that a recruiter should know at a glance:\n"
+            "  1. Top 3 core technical skills or certifications this person holds\n"
+            "  2. Total years of experience and the primary industry/domain they worked in\n"
+            "  3. One standout project, achievement, or notable qualification\n\n"
+            "Rules:\n"
+            "- Each bullet must be a single crisp sentence, max 20 words.\n"
+            "- Output ONLY the 3 bullet lines, no headers, no numbering, no markdown.\n"
+            "- If information is missing, make a reasonable inference from context.\n\n"
+            f"Resume Text:\n{cv_text[:10000]}"
+        )
+
+        models_to_try = [
+            'gemini-2.5-flash-lite',
+            'gemini-2.5-flash',
+            'gemini-flash-latest',
+            'gemini-2.5-pro',
+        ]
+
+        response_text = None
+        for model_name in models_to_try:
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(temperature=0.2),
+                )
+                if response.text:
+                    response_text = response.text.strip()
+                    break
+            except Exception as e:
+                err = str(e)
+                if '429' in err or 'RESOURCE_EXHAUSTED' in err:
+                    import time; time.sleep(5)
+                elif '404' in err or 'not found' in err.lower():
+                    continue
+                else:
+                    logger.warning(f'Gemini model {model_name} error: {err[:80]}')
+                    continue
+
+        if not response_text:
+            return jsonify({'error': 'Gemini API did not return a response.'}), 502
+
+        # Parse lines into clean bullet list
+        raw_lines = [l.strip() for l in response_text.splitlines() if l.strip()]
+        bullets = []
+        for line in raw_lines:
+            cleaned = line.lstrip('-*\u2022\u2013\u2014 0123456789.').strip()
+            if cleaned:
+                bullets.append('\u2022 ' + cleaned)
+        bullets = bullets[:3]
+        if not bullets:
+            bullets = [response_text]
+
+        return jsonify({'bullets': bullets})
+
+    except Exception as e:
+        logger.error(f'Instant summary error for candidate {cand_id}: {e}')
+        return jsonify({'error': f'AI service error: {str(e)[:120]}'}), 500
 
 # ── CV File Existence Check ────────────────────────────────────────────────────
 
@@ -972,6 +1133,9 @@ def score_candidate_data(candidate_text, target_domain='', file_hint='', jd_text
     # 5. AI Precision ATS Parsing & Semantic Enrichment (Google Gemini)
     ai_result = analyze_candidate_with_ai(candidate_text, jd_text, target_domain, match_score)
     ai_analysis_payload = None
+    eligible = True
+    veto_reason = None
+
     if ai_result and isinstance(ai_result, dict):
         # 1. Enforce AI cleaned full_name (prevents headers like PERSONAL DETAILS or trailing MBA/PMP)
         ai_name = ai_result.get("full_name")
@@ -990,22 +1154,32 @@ def score_candidate_data(candidate_text, target_domain='', file_hint='', jd_text
         if isinstance(ai_result.get("relevant_experience_years"), (int, float)):
             relevant_exp = round(float(ai_result["relevant_experience_years"]), 1)
 
-        # 4. Use precision AI match_score (blended 20% algorithmic + 80% AI semantic for maximum accuracy)
+        # 4. Check eligibility from AI
+        if "eligible" in ai_result:
+            eligible = bool(ai_result["eligible"])
+        if "justification" in ai_result:
+            veto_reason = ai_result["justification"]
+
+        # 5. Use precision AI match_score (blended 20% algorithmic + 80% AI semantic for maximum accuracy)
         if isinstance(ai_result.get("match_score"), (int, float)):
             match_score = int(round(0.2 * match_score + 0.8 * float(ai_result["match_score"])))
             match_score = max(0, min(100, match_score))
 
-        # 5. Merge or use AI skills matrix and specialization tags
+        # Hard stop rule: cap the score at 40% if the candidate lacks any mandatory requirement
+        if not eligible:
+            match_score = min(40, match_score)
+
+        # 6. Merge or use AI skills matrix and specialization tags
         if isinstance(ai_result.get("skills_matrix"), list) and len(ai_result["skills_matrix"]) > 0:
             skills_matrix = [str(s).upper() for s in ai_result["skills_matrix"]]
         if isinstance(ai_result.get("specialization_tags"), list) and len(ai_result["specialization_tags"]) > 0:
             specialization_tags = [str(t) for t in ai_result["specialization_tags"]]
 
-        # 6. Use AI industry remarks
+        # 7. Use AI industry remarks
         if ai_result.get("industry_remarks"):
             remarks = str(ai_result["industry_remarks"])
 
-        # 7. Extract interview and summary report for frontend AI panel
+        # 8. Extract interview and summary report for frontend AI panel
         ai_analysis_payload = ai_result.get("ai_analysis")
         if not ai_analysis_payload or not isinstance(ai_analysis_payload, dict):
             ai_analysis_payload = {
@@ -1027,8 +1201,69 @@ def score_candidate_data(candidate_text, target_domain='', file_hint='', jd_text
         "skills_matrix": skills_matrix if skills_matrix else ["GENERAL TECHNICAL"],
         "specialization_tags": specialization_tags,
         "industry_remarks": remarks,
-        "ai_analysis": ai_analysis_payload
+        "ai_analysis": ai_analysis_payload,
+        "eligible": eligible,
+        "veto_reason": veto_reason
     }
+
+# ── Mandatory employer-keyword veto (Python-side safety net) ─────────────────
+# These are the known mandatory employer/programme keywords for active job posts.
+# The AI prompt is the primary enforcer; this block is an explicit Python
+# fallback that runs AFTER the AI result is returned to guarantee correctness.
+# All comparisons are normalised to lowercase so casing in the JD or CV never
+# causes a missed match.
+_MANDATORY_EMPLOYER_KEYWORDS = [
+    "sec",               # Saudi Electricity Company
+    "aramco",            # Saudi Aramco
+    "national grid ksa", # National Grid SA
+    "marafiq",           # Power & Water Utility
+]
+
+def _apply_mandatory_keyword_veto(scored: dict, candidate_text: str, jd_text: str) -> dict:
+    """
+    Python-side safety net for mandatory employer/programme requirements.
+
+    • All string comparisons are normalised with .lower() so casing in the
+      source documents never causes a false negative.
+    • If the active JD contains at least one mandatory keyword AND the raw
+      CV text contains none of those keywords, the candidate is forcibly vetoed:
+        - eligible    -> False
+        - match_score -> min(ai_score, 40)   # cap at 40, never raise below-40 AI scores
+        - veto_reason -> descriptive message listing the missing requirement
+    • If the JD does not mention any mandatory keyword, no veto fires so
+      non-regulated job posts are completely unaffected.
+    """
+    # ── Normalise both texts once (case-insensitive, strip extra whitespace) ──
+    jd_lower  = (jd_text  or "").lower()
+    cv_lower  = (candidate_text or "").lower()
+
+    # Which mandatory keywords appear in THIS job description?
+    required_in_jd = [kw for kw in _MANDATORY_EMPLOYER_KEYWORDS if kw in jd_lower]
+
+    if not required_in_jd:
+        return scored  # No regulated requirement in this JD → skip
+
+    # Does the CV mention at least one of the required employer/programme names?
+    cv_has_required = any(kw in cv_lower for kw in required_in_jd)
+
+    if not cv_has_required:
+        missing = ", ".join(k.upper() for k in required_in_jd)
+        original_score = scored.get("match_score", 0)
+        capped_score   = min(original_score, 40)   # never raise a sub-40 AI score
+        scored["eligible"]    = False
+        scored["match_score"] = capped_score
+        scored["veto_reason"] = (
+            f"MANDATORY employer requirement not met. "
+            f"This position requires experience with: {missing}. "
+            f"No evidence of this was found in the candidate's CV."
+        )
+        _app_logger.info(
+            "[VETO] Mandatory-keyword veto applied | missing=%s | score %d→%d",
+            missing, original_score, capped_score,
+        )
+
+    return scored
+
 
 @app.route('/api/v1/screen-candidate', methods=['POST'])
 def screen_candidate():
@@ -1042,6 +1277,10 @@ def screen_candidate():
     file_hint      = data.get('file_hint', '')
 
     response_payload = score_candidate_data(candidate_text, target_domain, file_hint=file_hint, jd_text=jd_text)
+
+    # Python-side mandatory keyword veto (safety net after AI scoring)
+    response_payload = _apply_mandatory_keyword_veto(response_payload, candidate_text, jd_text)
+
     return jsonify(response_payload)
 
 
@@ -1602,19 +1841,27 @@ def gdrive_import():
                 "details": f"Checked temp directory. Total files found: {len(downloaded_paths)}"
             }), 400
             
-        for file_path in files_found:
+        def _process_gdrive_file(file_path):
+            """Extract, score and veto a single downloaded Drive file."""
             file_name = os.path.basename(file_path)
             file_size = os.path.getsize(file_path)
-            
-            raw_text = extract_text_from_file(file_path)
-            scored_data = score_candidate_data(raw_text, target_domain, file_hint=file_name, jd_text=jd_text)
-            
-            candidates.append({
-                "fileName": file_name,
-                "fileSize": file_size,
-                "parsedData": scored_data
-            })
-            
+            raw_text  = extract_text_from_file(file_path)
+            scored    = score_candidate_data(raw_text, target_domain, file_hint=file_name, jd_text=jd_text)
+            scored    = _apply_mandatory_keyword_veto(scored, raw_text, jd_text)
+            return {"fileName": file_name, "fileSize": file_size, "parsedData": scored}
+
+        # Process concurrently (max 8 threads; each call is I/O + API bound)
+        candidates = []
+        max_workers = min(8, len(files_found))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(_process_gdrive_file, fp): fp for fp in files_found}
+            for future in as_completed(futures):
+                try:
+                    candidates.append(future.result())
+                except Exception as exc:
+                    fp = futures[future]
+                    _app_logger.error("GDrive file %s failed: %s", os.path.basename(fp), exc)
+
         return jsonify({
             "success": True,
             "count": len(candidates),
@@ -1635,7 +1882,7 @@ def gdrive_import():
 
 @app.route('/api/v1/upload-cv', methods=['POST'])
 def upload_cv():
-    """Accept a CV file upload, save it permanently, extract text, screen it, and return results."""
+    """Accept a single CV file upload, screen it, apply veto and return results."""
     if 'file' not in request.files:
         return jsonify({"error": "No file part in request"}), 400
 
@@ -1651,19 +1898,162 @@ def upload_cv():
 
     # Save with a unique name to avoid collisions
     safe_original = re.sub(r'[^\w\-. ]', '_', file.filename)
-    unique_name = f"{uuid.uuid4().hex[:8]}_{safe_original}"
-    save_path = os.path.join(UPLOAD_FOLDER, unique_name)
+    unique_name   = f"{uuid.uuid4().hex[:8]}_{safe_original}"
+    save_path     = os.path.join(UPLOAD_FOLDER, unique_name)
     file.save(save_path)
 
-    # Extract text from the saved file
+    # Extract text, score and apply Python veto
     raw_text = extract_text_from_file(save_path)
-
-    # Run AI screening with JD as primary signal
-    jd_text = request.form.get('job_description_text', '')
-    scored = score_candidate_data(raw_text, target_domain, file_hint=file.filename, jd_text=jd_text)
+    jd_text  = request.form.get('job_description_text', '')
+    scored   = score_candidate_data(raw_text, target_domain, file_hint=file.filename, jd_text=jd_text)
+    scored   = _apply_mandatory_keyword_veto(scored, raw_text, jd_text)
     scored['cv_file_name'] = unique_name
 
     return jsonify(scored)
+
+
+@app.route('/api/v1/batch-upload-cv', methods=['POST'])
+def batch_upload_cv():
+    """
+    High-throughput batch endpoint — accepts up to 1,000 CV files in a single
+    multipart/form-data POST.  Files are processed concurrently using a
+    ThreadPoolExecutor so the browser never waits for sequential AI calls.
+
+    Each processed file is immediately written to the database via upsert so
+    results are durable even if the client disconnects mid-response.
+
+    Form fields:
+        files[]          – one or more CV files (PDF / DOCX / DOC / TXT)
+        target_domain    – requisition domain string
+        requisition_id   – integer requisition ID (required for DB insert)
+        job_description_text – full JD text used for AI scoring + veto check
+
+    Returns:
+        { success, count, candidates: [ { fileName, fileSize, parsedData } ] }
+    """
+    files         = request.files.getlist('files[]') or request.files.getlist('file')
+    target_domain = request.form.get('target_domain', 'Information Technology')
+    req_id        = request.form.get('requisition_id', type=int)
+    jd_text       = request.form.get('job_description_text', '')
+
+    if not files:
+        return jsonify({"error": "No files provided. Use field name 'files[]'."}), 400
+    if not req_id:
+        return jsonify({"error": "requisition_id is required for batch upload."}), 400
+    if len(files) > 1000:
+        return jsonify({"error": "Maximum 1,000 files per batch request."}), 400
+
+    # ── Save all files to disk first (fast, no AI yet) ──────────────────────
+    pending = []  # list of (save_path, unique_name, original_filename)
+    for f in files:
+        if not f or f.filename == '':
+            continue
+        ext = os.path.splitext(f.filename)[1].lower()
+        if ext not in SUPPORTED_EXTENSIONS:
+            continue
+        safe_original = re.sub(r'[^\w\-. ]', '_', f.filename)
+        unique_name   = f"{uuid.uuid4().hex[:8]}_{safe_original}"
+        save_path     = os.path.join(UPLOAD_FOLDER, unique_name)
+        f.save(save_path)
+        pending.append((save_path, unique_name, f.filename))
+
+    if not pending:
+        return jsonify({"error": "No supported files found in request (accepted: .pdf, .docx, .doc, .txt)."}), 400
+
+    # ── Process each saved file concurrently ─────────────────────────────────
+    def _screen_one(args):
+        save_path, unique_name, orig_name = args
+        try:
+            raw_text = extract_text_from_file(save_path)
+            scored   = score_candidate_data(raw_text, target_domain, file_hint=orig_name, jd_text=jd_text)
+            scored   = _apply_mandatory_keyword_veto(scored, raw_text, jd_text)
+            scored['cv_file_name'] = unique_name
+            file_size = os.path.getsize(save_path)
+
+            # ── Immediately upsert into DB so record survives client disconnect ──
+            candidate_payload = {
+                'requisition_id':            req_id,
+                'full_name':                 scored.get('full_name', orig_name),
+                'email':                     scored.get('email', ''),
+                'phone':                     scored.get('phone', ''),
+                'passport_number':           scored.get('passport_number'),
+                'current_stage':             'Screening',
+                'total_experience_years':    float(scored.get('total_experience_years', 0)),
+                'relevant_experience_years': float(scored.get('relevant_experience_years', 0)),
+                'match_score':               int(scored.get('match_score', 0)),
+                'skills_matrix':             json.dumps(scored.get('skills_matrix', [])),
+                'specialization_tags':       json.dumps(scored.get('specialization_tags', [])),
+                'industry_remarks':          scored.get('industry_remarks', ''),
+                'ai_analysis':               json.dumps(scored.get('ai_analysis')) if scored.get('ai_analysis') else None,
+                'eligible':                  1 if scored.get('eligible', True) else 0,
+                'veto_reason':               scored.get('veto_reason'),
+                'cv_file_name':              unique_name,
+            }
+            full_name   = candidate_payload['full_name']
+            email_clean = (candidate_payload['email'] or '').strip().lower()
+            phone_clean = (candidate_payload['phone'] or '').strip()
+
+            with get_db() as conn:
+                existing = conn.execute(
+                    '''
+                    SELECT id FROM candidates WHERE
+                        (LOWER(email) = ? AND ? != '') OR
+                        (phone = ? AND ? != '') OR
+                        (requisition_id = ? AND LOWER(full_name) = LOWER(?))
+                    LIMIT 1
+                    ''',
+                    (email_clean, email_clean, phone_clean, phone_clean, req_id, full_name)
+                ).fetchone()
+
+                update_fields = {k: v for k, v in candidate_payload.items()
+                                 if k not in ('requisition_id', 'full_name')}
+
+                if existing:
+                    set_clause = ', '.join(f'{k}=?' for k in update_fields)
+                    conn.execute(
+                        f'UPDATE candidates SET {set_clause} WHERE id=?',
+                        list(update_fields.values()) + [existing['id']]
+                    )
+                    conn.commit()
+                    row = conn.execute('SELECT * FROM candidates WHERE id=?', (existing['id'],)).fetchone()
+                else:
+                    all_fields = {**candidate_payload}
+                    cols  = ', '.join(all_fields.keys())
+                    placeholders = ', '.join('?' for _ in all_fields)
+                    cur = conn.execute(
+                        f'INSERT INTO candidates ({cols}) VALUES ({placeholders})',
+                        list(all_fields.values())
+                    )
+                    conn.commit()
+                    row = conn.execute('SELECT * FROM candidates WHERE id=?', (cur.lastrowid,)).fetchone()
+
+            return {
+                'fileName':   unique_name,
+                'fileSize':   file_size,
+                'parsedData': {**scored, **row_to_candidate(row)},
+            }
+        except Exception as exc:
+            _app_logger.error("batch_upload_cv: error processing %s: %s", orig_name, exc, exc_info=True)
+            return {
+                'fileName':   unique_name,
+                'fileSize':   0,
+                'error':      str(exc),
+                'parsedData': {'full_name': orig_name, 'match_score': 0, 'eligible': False,
+                               'veto_reason': f'Processing error: {exc}'},
+            }
+
+    max_workers = min(10, len(pending))  # cap at 10 simultaneous AI calls
+    results = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_screen_one, args): args for args in pending}
+        for future in as_completed(futures):
+            results.append(future.result())
+
+    return jsonify({
+        'success':    True,
+        'count':      len(results),
+        'candidates': results,
+    })
 
 
 @app.route('/api/v1/cv/<path:filename>', methods=['GET'])

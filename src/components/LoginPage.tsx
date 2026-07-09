@@ -58,6 +58,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
         <div className="login-orb login-orb-1" />
         <div className="login-orb login-orb-2" />
         <div className="login-orb login-orb-3" />
+        <div className="login-orb-4" />
         <div className="login-grid" />
       </div>
 
