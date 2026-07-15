@@ -4,6 +4,15 @@
     "email": "admin@hireengine.ai",
     "password_hash": "9b5edb558f48774ac9306e802dc030a68ce97cf533eeb68260e2c6421f77d7c3",
     "name": "System Administrator",
-    "role": "Admin"
+    "role": "Admin",
+    "tenant_id": "admin-tenant"
+  },
+  {
+    "id": "3060e467-8c69-4560-8895-73cf1f62e4c9",
+    "email": "acme@test.com",
+    "password_hash": "0b6a29b64dbcfed6586cff71b252309c135d4dcc52d6d180b537424b4299818f",
+    "name": "Acme Corp",
+    "role": "Recruiter",
+    "tenant_id": "acacd871-b5f9-4c66-ba1a-4891218b2ca4"
   }
 ]

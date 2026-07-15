@@ -268,7 +268,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
     }
   };
 
-  const toggleSelectCandidate = (e: React.MouseEvent, id: number) => {
+  const toggleSelectCandidate = (e: React.SyntheticEvent, id: number) => {
     e.stopPropagation();
     setSelectedIds(prev => prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]);
   };
@@ -426,7 +426,12 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                 </button>
               ))}
               <button
-                onClick={() => setSelectedIds([])}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  setSelectedIds([]);
+                }}
                 className="text-xs font-semibold text-slate-400 hover:text-rose-500 ml-2 px-2 py-1 cursor-pointer"
               >
                 Clear Selection
@@ -628,18 +633,14 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                   <div className="flex-1 flex flex-col justify-start">
                     {/* Header: Name, Score */}
                     <div className="candidate-card-header">
-                      <button
-                        type="button"
-                        onClick={(e) => toggleSelectCandidate(e, candidate.id)}
-                        className="mr-2 p-1 rounded hover:bg-black/5 transition-colors cursor-pointer flex-shrink-0"
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.includes(candidate.id)}
+                        onChange={(e) => toggleSelectCandidate(e, candidate.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="mr-3 h-4 w-4 rounded border-slate-300 text-[var(--primary)] focus:ring-[var(--primary)] cursor-pointer flex-shrink-0"
                         title={selectedIds.includes(candidate.id) ? "Deselect candidate" : "Select candidate"}
-                      >
-                        {selectedIds.includes(candidate.id) ? (
-                          <CheckSquare className="h-4 w-4 text-[var(--primary)]" />
-                        ) : (
-                          <Square className="h-4 w-4 text-slate-300 hover:text-slate-500" />
-                        )}
-                      </button>
+                      />
 
                       <div className="flex flex-col min-w-0 flex-1 mr-3" style={{ minWidth: 0, overflow: 'hidden' }}>
                         <h4 className="candidate-card-title">
@@ -780,18 +781,14 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div className="flex items-start gap-2 min-w-0 flex-1 mr-2">
-                              <button
-                                type="button"
-                                onClick={(e) => toggleSelectCandidate(e, candidate.id)}
-                                className="mt-0.5 p-0.5 rounded hover:bg-black/5 transition-colors cursor-pointer flex-shrink-0"
+                              <input
+                                type="checkbox"
+                                checked={selectedIds.includes(candidate.id)}
+                                onChange={(e) => toggleSelectCandidate(e, candidate.id)}
+                                onClick={(e) => e.stopPropagation()}
+                                className="mt-1 mr-2 h-4 w-4 rounded border-slate-300 text-[var(--primary)] focus:ring-[var(--primary)] cursor-pointer flex-shrink-0"
                                 title={selectedIds.includes(candidate.id) ? "Deselect candidate" : "Select candidate"}
-                              >
-                                {selectedIds.includes(candidate.id) ? (
-                                  <CheckSquare className="h-3.5 w-3.5 text-[var(--primary)]" />
-                                ) : (
-                                  <Square className="h-3.5 w-3.5 text-slate-300 hover:text-slate-500" />
-                                )}
-                              </button>
+                              />
                               <span className="text-sm font-bold text-[var(--text-primary)] truncate block min-w-0" title={candidate.full_name}>
                                 {candidate.full_name}
                               </span>

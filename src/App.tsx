@@ -3,7 +3,7 @@ import {
   Building2, Users, FileUp, ClipboardList, BarChart3, Plus, 
   MapPin, Database, Layers, CheckCircle2, ArrowRight, Trash2,
   AlertTriangle, TrendingUp, Clock, Target, LogOut, UserCog,
-  Key, Lock, X as XIcon, AlertCircle
+  Key, Lock, X as XIcon, AlertCircle, Pencil
 } from 'lucide-react';
 import { Requisition, Candidate, HiringStage, TargetDomain } from './types';
 import { BulkUploadQueue } from './components/BulkUploadQueue';
@@ -42,15 +42,34 @@ const STAGES: HiringStage[] = ['Screening', 'Shortlist', 'Interviewing', 'Offere
 function App() {
   // ── Authentication ───────────────────────────────────────────
   const [authToken, setAuthToken] = useState<string | null>(() => localStorage.getItem('hireengine_token'));
-  const [authUser, setAuthUser] = useState<{ name: string; role: string; email: string } | null>(() => {
+  const [authUser, setAuthUser] = useState<{ name: string; role: string; email: string; tenant_id?: string; is_super_admin?: boolean } | null>(() => {
     try { return JSON.parse(localStorage.getItem('hireengine_user') || 'null'); } catch { return null; }
   });
+
+  // ── Custom Routing ───────────────────────────────────────────
+  const [currentPath, setCurrentPath] = useState(() => window.location.pathname);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setCurrentPath(window.location.pathname);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  const navigate = useCallback((path: string) => {
+    if (window.location.pathname !== path) {
+      window.history.pushState(null, '', path);
+      setCurrentPath(path);
+    }
+  }, []);
 
   const handleLogin = (token: string, user: { name: string; role: string; email: string }) => {
     localStorage.setItem('hireengine_token', token);
     localStorage.setItem('hireengine_user', JSON.stringify(user));
     setAuthToken(token);
     setAuthUser(user);
+    navigate('/dashboard');
   };
 
   const handleLogout = () => {
@@ -58,12 +77,41 @@ function App() {
     localStorage.removeItem('hireengine_user');
     setAuthToken(null);
     setAuthUser(null);
+    navigate('/login');
   };
 
   // Hook definitions completed, authentication check moved below to satisfy Hook order rules
   // ─────────────────────────────────────────────────────────────
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'screener' | 'directory' | 'requisitions' | 'users'>('dashboard');
+  const isAuthenticated = !!(authToken && authUser);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      if (currentPath !== '/login') {
+        navigate('/login');
+      }
+    } else {
+      if (currentPath === '/' || currentPath === '/login' || !currentPath.startsWith('/dashboard')) {
+        navigate('/dashboard');
+      }
+    }
+  }, [isAuthenticated, currentPath, navigate]);
+
+  const activeTab = React.useMemo(() => {
+    if (currentPath.startsWith('/dashboard/screener')) return 'screener';
+    if (currentPath.startsWith('/dashboard/directory')) return 'directory';
+    if (currentPath.startsWith('/dashboard/requisitions')) return 'requisitions';
+    if (currentPath.startsWith('/dashboard/users')) return 'users';
+    return 'dashboard';
+  }, [currentPath]);
+
+  const setActiveTab = useCallback((tab: 'dashboard' | 'screener' | 'directory' | 'requisitions' | 'users') => {
+    if (tab === 'dashboard') {
+      navigate('/dashboard');
+    } else {
+      navigate(`/dashboard/${tab}`);
+    }
+  }, [navigate]);
 
   // Create authenticated apiFetch helper that auto-logs out on 401
   const apiFetch = React.useMemo(() => {
@@ -126,13 +174,13 @@ function App() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
 
-  // Fetch initial data from backend database
+  // Fetch initial data from backend database (must send auth token for tenant scoping)
   useEffect(() => {
-    if (!authToken) return;
+    if (!authToken || !apiFetch) return;
     setDataLoading(true);
     Promise.all([
-      fetch('http://localhost:5000/api/v1/requisitions').then(res => res.json()),
-      fetch('http://localhost:5000/api/v1/candidates').then(res => res.json())
+      apiFetch('http://localhost:5000/api/v1/requisitions').then(res => res.json()),
+      apiFetch('http://localhost:5000/api/v1/candidates').then(res => res.json())
     ])
       .then(([reqData, candData]) => {
         if (Array.isArray(reqData)) setRequisitions(reqData);
@@ -144,7 +192,7 @@ function App() {
       .finally(() => {
         setDataLoading(false);
       });
-  }, [authToken]);
+  }, [authToken, apiFetch]);
 
   // Persisted upload queue â€” in-flight items are reset to 'failed' on reload
   const [queue, setQueue] = useLocalStorage<import('./types').QueueItem[]>('hireengine_queue', []);
@@ -184,6 +232,33 @@ function App() {
 
   // Clear all confirm modal
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+
+  // Requisition delete confirm modal
+  const [deleteReqTarget, setDeleteReqTarget] = useState<Requisition | null>(null);
+
+  // Requisition edit modal state
+  const [editReqTarget, setEditReqTarget] = useState<Requisition | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editLocation, setEditLocation] = useState('');
+  const [editDomain, setEditDomain] = useState<TargetDomain | ''>('');
+  const [editDesc, setEditDesc] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+
+  const openEditReq = (req: Requisition) => {
+    setEditReqTarget(req);
+    setEditTitle(req.job_title);
+    setEditLocation(req.location);
+    setEditDomain(req.target_domain as TargetDomain);
+    setEditDesc(req.job_description_text);
+  };
+
+  const closeEditReq = () => {
+    setEditReqTarget(null);
+    setEditTitle('');
+    setEditLocation('');
+    setEditDomain('');
+    setEditDesc('');
+  };
 
   // Ensure activeReqId is always valid
   useEffect(() => {
@@ -250,6 +325,33 @@ function App() {
       addToast(`"${req?.job_title}" deleted. ${cascadeCount > 0 ? `${cascadeCount} associated candidate(s) removed.` : ''}`, 'warning');
     } catch (err) {
       addToast('Failed to delete requisition on server.', 'error');
+    }
+  };
+
+  const handleUpdateRequisition = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editReqTarget || !editTitle.trim() || !editDesc.trim()) return;
+    setEditSaving(true);
+    try {
+      const res = await fetch(`http://localhost:5000/api/v1/requisitions/${editReqTarget.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          job_title: editTitle.trim(),
+          location: editLocation.trim() || 'Not specified',
+          target_domain: editDomain || editReqTarget.target_domain,
+          job_description_text: editDesc.trim()
+        })
+      });
+      if (!res.ok) throw new Error('Failed to update requisition');
+      const updated: Requisition = await res.json();
+      setRequisitions(prev => prev.map(r => r.id === updated.id ? updated : r));
+      addToast(`Requisition "${updated.job_title}" updated successfully.`, 'success');
+      closeEditReq();
+    } catch (err) {
+      addToast('Failed to update requisition on server.', 'error');
+    } finally {
+      setEditSaving(false);
     }
   };
 
@@ -340,8 +442,16 @@ function App() {
   const highMatchCount = activeCandidates.filter(c => c.match_score >= 80).length;
 
   // Show login page if not authenticated
-  if (!authToken || !authUser) {
-    return <LoginPage onLogin={handleLogin} />;
+  if (!isAuthenticated) {
+    if (currentPath === '/login') {
+      return <LoginPage onLogin={handleLogin} />;
+    }
+    return <div className="flex h-screen w-screen items-center justify-center bg-[var(--bg-app)] text-[var(--text-muted)] text-sm">Redirecting to login...</div>;
+  }
+
+  // Redirecting state to prevent flash of layout on root landing or login page when authenticated
+  if (currentPath === '/' || currentPath === '/login') {
+    return <div className="flex h-screen w-screen items-center justify-center bg-[var(--bg-app)] text-[var(--text-muted)] text-sm">Redirecting to dashboard...</div>;
   }
 
   return (
@@ -385,6 +495,116 @@ function App() {
                 Clear All
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Requisition Confirm Modal */}
+      {deleteReqTarget && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setDeleteReqTarget(null)} />
+          <div className="relative bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-[var(--radius-lg)] p-8 max-w-sm w-full mx-4 shadow-2xl animate-fade-in">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-rose-500/10 flex items-center justify-center flex-shrink-0">
+                <AlertTriangle className="h-5 w-5 text-rose-500" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base text-[var(--text-primary)]">Delete Requisition?</h3>
+                <p className="text-xs text-[var(--text-muted)] mt-0.5">This action cannot be undone.</p>
+              </div>
+            </div>
+            <p className="text-sm text-[var(--text-secondary)] mb-6 leading-relaxed">
+              This will permanently delete <strong>"{deleteReqTarget.job_title}"</strong> and <strong>{candidates.filter(c => c.requisition_id === deleteReqTarget.id).length}</strong> associated candidate(s).
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setDeleteReqTarget(null)} className="flex-1 btn btn-secondary text-sm py-2.5 cursor-pointer">Cancel</button>
+              <button
+                onClick={() => { handleDeleteRequisition(deleteReqTarget.id); setDeleteReqTarget(null); }}
+                className="flex-1 btn text-sm py-2.5 cursor-pointer bg-rose-500 text-white hover:bg-rose-600 border-transparent"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Requisition Modal */}
+      {editReqTarget && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={closeEditReq} />
+          <div className="relative bg-[var(--bg-surface)] border border-[var(--border-light)] rounded-[var(--radius-lg)] w-full max-w-lg mx-4 shadow-2xl animate-fade-in overflow-hidden">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-7 py-5 border-b border-[var(--border-light)] bg-black/[0.01]">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-[var(--primary)]/10">
+                  <Pencil className="h-4 w-4 text-[var(--primary)]" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-[var(--text-primary)]">Edit Requisition</h3>
+                  <p className="text-xs text-[var(--text-muted)]">Update job details and description</p>
+                </div>
+              </div>
+              <button type="button" onClick={closeEditReq} className="p-1.5 rounded-full hover:bg-black/5 text-[var(--text-muted)] cursor-pointer transition-colors">
+                <XIcon className="h-5 w-5" />
+              </button>
+            </div>
+            {/* Modal Body */}
+            <form onSubmit={handleUpdateRequisition} className="p-7 flex flex-col gap-5">
+              <div>
+                <label className="form-label">Job Title</label>
+                <input
+                  type="text" required value={editTitle}
+                  onChange={e => setEditTitle(e.target.value)}
+                  placeholder="e.g. Lead Refinery Superintendent"
+                  className="form-input text-sm"
+                />
+              </div>
+              <div>
+                <label className="form-label">Location <span className="text-[var(--text-muted)] font-normal">(optional)</span></label>
+                <input
+                  type="text" value={editLocation}
+                  onChange={e => setEditLocation(e.target.value)}
+                  placeholder="e.g. Houston, US"
+                  className="form-input text-sm"
+                />
+              </div>
+              <div>
+                <label className="form-label">Industry Domain</label>
+                <select value={editDomain} onChange={e => setEditDomain(e.target.value as TargetDomain)} className="form-select text-sm">
+                  <option value="Oil &amp; Gas">Oil &amp; Gas</option>
+                  <option value="Petrochemical">Petrochemical</option>
+                  <option value="Construction &amp; Infrastructure">Construction &amp; Infrastructure</option>
+                  <option value="Energy">Energy</option>
+                  <option value="Hospitality">Hospitality</option>
+                  <option value="Facilities Management">Facilities Management</option>
+                  <option value="Maritime &amp; Shipping">Maritime &amp; Shipping</option>
+                  <option value="Power Plants">Power Plants</option>
+                  <option value="Engineering Services">Engineering Services</option>
+                  <option value="Manufacturing">Manufacturing</option>
+                  <option value="EPC">EPC</option>
+                </select>
+              </div>
+              <div>
+                <label className="form-label">Job Description <span className="text-[var(--primary)] font-semibold text-[10px]">(primary matching signal)</span></label>
+                <textarea
+                  required rows={5} value={editDesc}
+                  onChange={e => setEditDesc(e.target.value)}
+                  placeholder="Paste the full job description here..."
+                  className="form-textarea text-sm"
+                />
+              </div>
+              <div className="flex gap-3 pt-1 border-t border-[var(--border-light)]">
+                <button type="button" onClick={closeEditReq} className="flex-1 btn btn-secondary text-sm py-2.5 cursor-pointer">Cancel</button>
+                <button
+                  type="submit"
+                  disabled={editSaving || !editTitle.trim() || !editDesc.trim()}
+                  className="flex-1 btn btn-primary text-sm py-2.5 cursor-pointer disabled:opacity-50"
+                >
+                  {editSaving ? 'Saving…' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -942,17 +1162,22 @@ function App() {
                             >
                               {activeReqId === req.id ? '✓ Active' : 'Set Active'}
                             </button>
-                            <button
-                              onClick={() => {
-                                if (window.confirm(`Delete "${req.job_title}"? This will also remove ${reqCandidatesCount} associated candidate(s).`)) {
-                                  handleDeleteRequisition(req.id);
-                                }
-                              }}
-                              className="text-rose-400/70 hover:text-rose-500 p-1.5 hover:bg-rose-50 rounded-md transition-colors cursor-pointer"
-                              title="Delete Requisition"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => openEditReq(req)}
+                                className="text-[var(--text-muted)] hover:text-[var(--primary)] p-1.5 hover:bg-[var(--primary)]/10 rounded-md transition-colors cursor-pointer"
+                                title="Edit Requisition"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </button>
+                              <button
+                                onClick={() => setDeleteReqTarget(req)}
+                                className="text-rose-400/70 hover:text-rose-500 p-1.5 hover:bg-rose-50 rounded-md transition-colors cursor-pointer"
+                                title="Delete Requisition"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
                           </div>
                         </div>
                       );

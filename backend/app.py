@@ -51,14 +51,26 @@ def _load_users():
                 'email': 'admin@hireengine.ai',
                 'password_hash': _hash_password('admin1234'),
                 'name': 'System Administrator',
-                'role': 'Admin'
+                'role': 'Admin',
+                'tenant_id': 'admin-tenant'   # Fixed ID — matches DEFAULT in SQLite migrations
             }
         ]
         with open(USERS_DB_PATH, 'w') as f:
             json.dump(default, f, indent=2)
         return default
     with open(USERS_DB_PATH, 'r') as f:
-        return json.load(f)
+        users = json.load(f)
+    # ── Backfill: legacy accounts created before multi-tenancy ──────────────
+    dirty = False
+    for u in users:
+        if not u.get('tenant_id'):
+            # Admin gets the fixed anchor tenant; others get fresh isolated UUIDs
+            u['tenant_id'] = 'admin-tenant' if u.get('role') == 'Admin' else str(uuid.uuid4())
+            dirty = True
+    if dirty:
+        with open(USERS_DB_PATH, 'w') as f:
+            json.dump(users, f, indent=2)
+    return users
 
 def _save_users(users):
     with open(USERS_DB_PATH, 'w') as f:
@@ -117,10 +129,21 @@ def auth_login():
         return jsonify({'error': 'Invalid email or password.'}), 401
 
     exp = time.time() + JWT_EXPIRY_HOURS * 3600
-    token = _create_jwt({'sub': user['id'], 'email': user['email'], 'exp': exp})
+    token = _create_jwt({
+        'sub': user['id'],
+        'email': user['email'],
+        'tenant_id': user.get('tenant_id', ''),
+        'exp': exp
+    })
     return jsonify({
         'token': token,
-        'user': {'name': user['name'], 'role': user['role'], 'email': user['email']}
+        'user': {
+            'name': user['name'],
+            'role': user['role'],
+            'email': user['email'],
+            'tenant_id': user.get('tenant_id', ''),
+            'is_super_admin': user.get('role') == 'Admin'
+        }
     })
 
 @app.route('/api/v1/auth/register', methods=['POST'])
@@ -145,16 +168,28 @@ def auth_register():
         'email': email,
         'password_hash': _hash_password(password),
         'name': name,
-        'role': role
+        'role': role,
+        'tenant_id': str(uuid.uuid4())   # Auto-generated isolated tenant namespace
     }
     users.append(new_user)
     _save_users(users)
 
     exp = time.time() + JWT_EXPIRY_HOURS * 3600
-    token = _create_jwt({'sub': new_user['id'], 'email': new_user['email'], 'exp': exp})
+    token = _create_jwt({
+        'sub': new_user['id'],
+        'email': new_user['email'],
+        'tenant_id': new_user['tenant_id'],
+        'exp': exp
+    })
     return jsonify({
         'token': token,
-        'user': {'name': name, 'role': role, 'email': email}
+        'user': {
+            'name': name,
+            'role': role,
+            'email': email,
+            'tenant_id': new_user['tenant_id'],
+            'is_super_admin': role == 'Admin'
+        }
     }), 201
 
 @app.route('/api/v1/auth/verify', methods=['GET'])
@@ -170,7 +205,16 @@ def auth_verify():
     user = next((u for u in users if u['id'] == payload.get('sub')), None)
     if not user:
         return jsonify({'valid': False}), 401
-    return jsonify({'valid': True, 'user': {'name': user['name'], 'role': user['role'], 'email': user['email']}})
+    return jsonify({
+        'valid': True,
+        'user': {
+            'name': user['name'],
+            'role': user['role'],
+            'email': user['email'],
+            'tenant_id': user.get('tenant_id', ''),
+            'is_super_admin': user.get('role') == 'Admin'
+        }
+    })
 
 def _require_user(req):
     """Helper: verify Bearer token and return the calling user, else None."""
@@ -189,6 +233,22 @@ def _require_admin(request):
     if not caller or caller.get('role') != 'Admin':
         return None
     return caller
+
+def _get_caller_tenant(req):
+    """
+    Resolve the tenant scope for the calling user.
+
+    Returns:
+      None   — caller is the System Admin (super-admin bypass, global access).
+      str    — the caller's tenant_id UUID (normal tenant-scoped access).
+      False  — unauthenticated; caller must be rejected upstream.
+    """
+    caller = _require_user(req)
+    if not caller:
+        return False                          # unauthenticated
+    if caller.get('role') == 'Admin':
+        return None                           # None signals "no tenant filter"
+    return caller.get('tenant_id', '')        # normal scoped tenant
 
 @app.route('/api/v1/auth/change-password', methods=['PUT'])
 def auth_change_password():
@@ -261,6 +321,18 @@ def get_db():
 def init_db():
     """Create tables if missing and seed default requisitions on first launch."""
     with get_db() as conn:
+        # ── Tenants registry (informational, lightweight) ──────────────────────
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS tenants (
+                id   TEXT PRIMARY KEY,
+                name TEXT NOT NULL
+            )
+        ''')
+        # Ensure the system admin's anchor tenant exists
+        conn.execute(
+            "INSERT OR IGNORE INTO tenants (id, name) VALUES (?, ?)",
+            ('admin-tenant', 'System Administrator')
+        )
         conn.execute('''
             CREATE TABLE IF NOT EXISTS requisitions (
                 id                   INTEGER PRIMARY KEY,
@@ -269,6 +341,7 @@ def init_db():
                 target_domain        TEXT NOT NULL,
                 job_description_text TEXT NOT NULL,
                 screening_rules      TEXT,
+                tenant_id            TEXT NOT NULL DEFAULT "admin-tenant",
                 created_at           TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -291,6 +364,7 @@ def init_db():
                 ai_analysis              TEXT,
                 eligible                 INTEGER NOT NULL DEFAULT 1,
                 veto_reason              TEXT,
+                tenant_id                TEXT NOT NULL DEFAULT "admin-tenant",
                 created_at               TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -308,6 +382,9 @@ def init_db():
             'ALTER TABLE requisitions ADD COLUMN screening_rules TEXT',
             'ALTER TABLE candidates ADD COLUMN eligible INTEGER NOT NULL DEFAULT 1',
             'ALTER TABLE candidates ADD COLUMN veto_reason TEXT',
+            # Multi-tenancy migrations — idempotent (ignored if column exists)
+            "ALTER TABLE requisitions ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'admin-tenant'",
+            "ALTER TABLE candidates   ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'admin-tenant'",
         ]:
             try:
                 conn.execute(migration)
@@ -364,12 +441,25 @@ def row_to_candidate(row):
 
 @app.route('/api/v1/requisitions', methods=['GET'])
 def list_requisitions():
+    tid = _get_caller_tenant(request)
+    if tid is False:
+        return jsonify({'error': 'Authentication required.'}), 401
     with get_db() as conn:
-        rows = conn.execute('SELECT * FROM requisitions ORDER BY created_at DESC').fetchall()
+        if tid is None:   # Admin super-user: return all tenants
+            rows = conn.execute('SELECT * FROM requisitions ORDER BY created_at DESC').fetchall()
+        else:
+            rows = conn.execute(
+                'SELECT * FROM requisitions WHERE tenant_id=? ORDER BY created_at DESC', (tid,)
+            ).fetchall()
     return jsonify([row_to_requisition(r) for r in rows])
 
 @app.route('/api/v1/requisitions', methods=['POST'])
 def create_requisition():
+    tid = _get_caller_tenant(request)
+    if tid is False:
+        return jsonify({'error': 'Authentication required.'}), 401
+    # Admin writes into admin-tenant by default (unless tenant_id overridden)
+    effective_tid = tid if tid is not None else 'admin-tenant'
     data = request.get_json(force=True, silent=True) or {}
     title   = str(data.get('job_title', '')).strip()
     loc     = str(data.get('location', 'Not specified')).strip() or 'Not specified'
@@ -381,8 +471,8 @@ def create_requisition():
     rules_json = json.dumps(rules) if rules and isinstance(rules, dict) else None
     with get_db() as conn:
         cur = conn.execute(
-            'INSERT INTO requisitions (job_title, location, target_domain, job_description_text, screening_rules) VALUES (?,?,?,?,?)',
-            (title, loc, domain, jd_text, rules_json)
+            'INSERT INTO requisitions (job_title, location, target_domain, job_description_text, screening_rules, tenant_id) VALUES (?,?,?,?,?,?)',
+            (title, loc, domain, jd_text, rules_json, effective_tid)
         )
         conn.commit()
         row = conn.execute('SELECT * FROM requisitions WHERE id=?', (cur.lastrowid,)).fetchone()
@@ -391,11 +481,40 @@ def create_requisition():
 @app.route('/api/v1/requisitions/<int:req_id>/screening-rules', methods=['PUT'])
 def update_screening_rules(req_id):
     """Update (or clear) the screening rules for a requisition without recreating it."""
+    tid = _get_caller_tenant(request)
+    if tid is False:
+        return jsonify({'error': 'Authentication required.'}), 401
     data = request.get_json(force=True, silent=True) or {}
     rules = data.get('screening_rules')  # None to clear, dict to set
     rules_json = json.dumps(rules) if rules and isinstance(rules, dict) else None
     with get_db() as conn:
-        conn.execute('UPDATE requisitions SET screening_rules=? WHERE id=?', (rules_json, req_id))
+        if tid is None:   # Admin: update without tenant filter
+            conn.execute('UPDATE requisitions SET screening_rules=? WHERE id=?', (rules_json, req_id))
+        else:
+            conn.execute('UPDATE requisitions SET screening_rules=? WHERE id=? AND tenant_id=?', (rules_json, req_id, tid))
+        conn.commit()
+        row = conn.execute('SELECT * FROM requisitions WHERE id=?', (req_id,)).fetchone()
+    if not row:
+        return jsonify({'error': 'Requisition not found.'}), 404
+    return jsonify(row_to_requisition(row))
+
+@app.route('/api/v1/requisitions/<int:req_id>', methods=['PUT'])
+def update_requisition(req_id):
+    """Update editable fields of a requisition."""
+    tid = _get_caller_tenant(request)
+    if tid is False:
+        return jsonify({'error': 'Authentication required.'}), 401
+    data = request.get_json(force=True, silent=True) or {}
+    allowed = ('job_title', 'location', 'target_domain', 'job_description_text')
+    updates = {k: str(v).strip() for k, v in data.items() if k in allowed and v is not None}
+    if not updates:
+        return jsonify({'error': 'No valid fields provided for update.'}), 400
+    set_clause = ', '.join(f'{k}=?' for k in updates)
+    with get_db() as conn:
+        if tid is None:
+            conn.execute(f'UPDATE requisitions SET {set_clause} WHERE id=?', list(updates.values()) + [req_id])
+        else:
+            conn.execute(f'UPDATE requisitions SET {set_clause} WHERE id=? AND tenant_id=?', list(updates.values()) + [req_id, tid])
         conn.commit()
         row = conn.execute('SELECT * FROM requisitions WHERE id=?', (req_id,)).fetchone()
     if not row:
@@ -404,9 +523,16 @@ def update_screening_rules(req_id):
 
 @app.route('/api/v1/requisitions/<int:req_id>', methods=['DELETE'])
 def delete_requisition(req_id):
+    tid = _get_caller_tenant(request)
+    if tid is False:
+        return jsonify({'error': 'Authentication required.'}), 401
     with get_db() as conn:
-        conn.execute('DELETE FROM candidates WHERE requisition_id=?', (req_id,))
-        conn.execute('DELETE FROM requisitions WHERE id=?', (req_id,))
+        if tid is None:
+            conn.execute('DELETE FROM candidates WHERE requisition_id=?', (req_id,))
+            conn.execute('DELETE FROM requisitions WHERE id=?', (req_id,))
+        else:
+            conn.execute('DELETE FROM candidates WHERE requisition_id=? AND tenant_id=?', (req_id, tid))
+            conn.execute('DELETE FROM requisitions WHERE id=? AND tenant_id=?', (req_id, tid))
         conn.commit()
     return jsonify({'success': True})
 
@@ -414,17 +540,30 @@ def delete_requisition(req_id):
 
 @app.route('/api/v1/candidates', methods=['GET'])
 def list_candidates():
+    tid = _get_caller_tenant(request)
+    if tid is False:
+        return jsonify({'error': 'Authentication required.'}), 401
     req_id = request.args.get('req_id', type=int)
     with get_db() as conn:
-        if req_id:
-            rows = conn.execute('SELECT * FROM candidates WHERE requisition_id=? ORDER BY match_score DESC, created_at DESC', (req_id,)).fetchall()
+        if tid is None:   # Admin: global view
+            if req_id:
+                rows = conn.execute('SELECT * FROM candidates WHERE requisition_id=? ORDER BY match_score DESC, created_at DESC', (req_id,)).fetchall()
+            else:
+                rows = conn.execute('SELECT * FROM candidates ORDER BY match_score DESC, created_at DESC').fetchall()
         else:
-            rows = conn.execute('SELECT * FROM candidates ORDER BY match_score DESC, created_at DESC').fetchall()
+            if req_id:
+                rows = conn.execute('SELECT * FROM candidates WHERE requisition_id=? AND tenant_id=? ORDER BY match_score DESC, created_at DESC', (req_id, tid)).fetchall()
+            else:
+                rows = conn.execute('SELECT * FROM candidates WHERE tenant_id=? ORDER BY match_score DESC, created_at DESC', (tid,)).fetchall()
     return jsonify([row_to_candidate(r) for r in rows])
 
 @app.route('/api/v1/candidates', methods=['POST'])
 def upsert_candidate():
     """Create or update a candidate. Matches on full_name+requisition_id for deduplication."""
+    tid = _get_caller_tenant(request)
+    if tid is False:
+        return jsonify({'error': 'Authentication required.'}), 401
+    effective_tid = tid if tid is not None else 'admin-tenant'
     data = request.get_json(force=True, silent=True) or {}
     req_id    = data.get('requisition_id')
     full_name = str(data.get('full_name', '')).strip()
@@ -447,30 +586,32 @@ def upsert_candidate():
         'ai_analysis':              json.dumps(data.get('ai_analysis')) if data.get('ai_analysis') else None,
         'eligible':                 1 if data.get('eligible', True) else 0,
         'veto_reason':              data.get('veto_reason'),
+        'tenant_id':                effective_tid,
     }
 
     with get_db() as conn:
-        # Check for existing candidate by email, phone, passport, or name+req_id (smarter deduplication)
+        # Check for existing candidate scoped to this tenant
         email_clean = str(data.get('email', '')).strip().lower()
         phone_clean = str(data.get('phone', '')).strip()
         passport_clean = str(data.get('passport_number', '')).strip() if data.get('passport_number') else ''
-        
+
         query = '''
-            SELECT id FROM candidates WHERE 
+            SELECT id FROM candidates WHERE tenant_id=? AND (
             (LOWER(email) = ? AND ? != '') OR
             (phone = ? AND ? != '') OR
             (passport_number = ? AND ? != '') OR
             (requisition_id = ? AND LOWER(full_name) = LOWER(?))
+            )
             LIMIT 1
         '''
         existing = conn.execute(
             query,
-            (email_clean, email_clean, phone_clean, phone_clean, passport_clean, passport_clean, req_id, full_name)
+            (effective_tid, email_clean, email_clean, phone_clean, phone_clean, passport_clean, passport_clean, req_id, full_name)
         ).fetchone()
 
         if existing:
-            set_clause = ', '.join(f'{k}=?' for k in fields if k not in ('requisition_id', 'full_name'))
-            values = [v for k, v in fields.items() if k not in ('requisition_id', 'full_name')]
+            set_clause = ', '.join(f'{k}=?' for k in fields if k not in ('requisition_id', 'full_name', 'tenant_id'))
+            values = [v for k, v in fields.items() if k not in ('requisition_id', 'full_name', 'tenant_id')]
             conn.execute(f'UPDATE candidates SET {set_clause} WHERE id=?', values + [existing['id']])
             conn.commit()
             row = conn.execute('SELECT * FROM candidates WHERE id=?', (existing['id'],)).fetchone()
@@ -485,6 +626,9 @@ def upsert_candidate():
 
 @app.route('/api/v1/candidates/<int:cand_id>', methods=['PUT'])
 def update_candidate(cand_id):
+    tid = _get_caller_tenant(request)
+    if tid is False:
+        return jsonify({'error': 'Authentication required.'}), 401
     data = request.get_json(force=True, silent=True) or {}
     allowed = {'current_stage', 'email', 'phone', 'passport_number', 'match_score',
                'total_experience_years', 'relevant_experience_years',
@@ -505,7 +649,10 @@ def update_candidate(cand_id):
         return jsonify({'error': 'No valid fields to update.'}), 400
     with get_db() as conn:
         set_clause = ', '.join(f'{k}=?' for k in updates)
-        conn.execute(f'UPDATE candidates SET {set_clause} WHERE id=?', list(updates.values()) + [cand_id])
+        if tid is None:
+            conn.execute(f'UPDATE candidates SET {set_clause} WHERE id=?', list(updates.values()) + [cand_id])
+        else:
+            conn.execute(f'UPDATE candidates SET {set_clause} WHERE id=? AND tenant_id=?', list(updates.values()) + [cand_id, tid])
         conn.commit()
         row = conn.execute('SELECT * FROM candidates WHERE id=?', (cand_id,)).fetchone()
     if not row:
@@ -514,21 +661,38 @@ def update_candidate(cand_id):
 
 @app.route('/api/v1/candidates/<int:cand_id>', methods=['DELETE'])
 def delete_candidate(cand_id):
+    tid = _get_caller_tenant(request)
+    if tid is False:
+        return jsonify({'error': 'Authentication required.'}), 401
     with get_db() as conn:
-        conn.execute('DELETE FROM candidates WHERE id=?', (cand_id,))
+        if tid is None:
+            conn.execute('DELETE FROM candidates WHERE id=?', (cand_id,))
+        else:
+            conn.execute('DELETE FROM candidates WHERE id=? AND tenant_id=?', (cand_id, tid))
         conn.commit()
     return jsonify({'success': True})
 
 @app.route('/api/v1/candidates/clear', methods=['DELETE'])
 def clear_candidates():
+    tid = _get_caller_tenant(request)
+    if tid is False:
+        return jsonify({'error': 'Authentication required.'}), 401
+    effective_tid = tid if tid is not None else 'admin-tenant'
     req_id = request.args.get('req_id', type=int)
     with get_db() as conn:
-        if req_id:
-            conn.execute('DELETE FROM candidates WHERE requisition_id=?', (req_id,))
+        if tid is None:   # Admin clears globally (or by req_id)
+            if req_id:
+                conn.execute('DELETE FROM candidates WHERE requisition_id=?', (req_id,))
+            else:
+                conn.execute('DELETE FROM candidates')
         else:
-            conn.execute('DELETE FROM candidates')
+            if req_id:
+                conn.execute('DELETE FROM candidates WHERE requisition_id=? AND tenant_id=?', (req_id, effective_tid))
+            else:
+                conn.execute('DELETE FROM candidates WHERE tenant_id=?', (effective_tid,))
         conn.commit()
     return jsonify({'success': True})
+
 
 @app.route('/api/v1/candidates/<int:cand_id>/notes', methods=['GET'])
 def get_candidate_notes(cand_id):
@@ -1931,6 +2095,11 @@ def batch_upload_cv():
     Returns:
         { success, count, candidates: [ { fileName, fileSize, parsedData } ] }
     """
+    tid = _get_caller_tenant(request)
+    if tid is False:
+        return jsonify({'error': 'Authentication required.'}), 401
+    effective_tid = tid if tid is not None else 'admin-tenant'
+
     files         = request.files.getlist('files[]') or request.files.getlist('file')
     target_domain = request.form.get('target_domain', 'Information Technology')
     req_id        = request.form.get('requisition_id', type=int)
@@ -1988,6 +2157,7 @@ def batch_upload_cv():
                 'eligible':                  1 if scored.get('eligible', True) else 0,
                 'veto_reason':               scored.get('veto_reason'),
                 'cv_file_name':              unique_name,
+                'tenant_id':                 effective_tid,
             }
             full_name   = candidate_payload['full_name']
             email_clean = (candidate_payload['email'] or '').strip().lower()
@@ -1996,17 +2166,18 @@ def batch_upload_cv():
             with get_db() as conn:
                 existing = conn.execute(
                     '''
-                    SELECT id FROM candidates WHERE
+                    SELECT id FROM candidates WHERE tenant_id=? AND (
                         (LOWER(email) = ? AND ? != '') OR
                         (phone = ? AND ? != '') OR
                         (requisition_id = ? AND LOWER(full_name) = LOWER(?))
+                    )
                     LIMIT 1
                     ''',
-                    (email_clean, email_clean, phone_clean, phone_clean, req_id, full_name)
+                    (effective_tid, email_clean, email_clean, phone_clean, phone_clean, req_id, full_name)
                 ).fetchone()
 
                 update_fields = {k: v for k, v in candidate_payload.items()
-                                 if k not in ('requisition_id', 'full_name')}
+                                 if k not in ('requisition_id', 'full_name', 'tenant_id')}
 
                 if existing:
                     set_clause = ', '.join(f'{k}=?' for k in update_fields)
