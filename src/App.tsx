@@ -1028,7 +1028,6 @@ function App() {
                 <BulkUploadQueue 
                   activeRequisition={activeRequisition} 
                   onCandidatesParsed={handleCandidatesParsed}
-                  candidates={candidates}
                   queue={queue}
                   setQueue={setQueue}
                 />

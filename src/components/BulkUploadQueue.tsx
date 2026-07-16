@@ -5,7 +5,7 @@ import { QueueItem, Requisition, Candidate, TargetDomain } from '../types';
 
 interface BulkUploadQueueProps {
   activeRequisition: Requisition | null;
-  onCandidatesParsed: (candidates: Candidate[]) => void;
+  onCandidatesParsed: (candidates: Candidate[], isRescreen?: boolean) => Promise<void> | void;
   queue: QueueItem[];
   setQueue: React.Dispatch<React.SetStateAction<QueueItem[]>>;
 }
@@ -80,47 +80,61 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
     }));
     setQueue(prev => [...prev, ...newQueueItems]);
 
+    // Build an identity map from File object → queue item ID (avoids duplicate filename issues)
+    const fileToQueueId = new Map<File, string>();
+    files.forEach((file, idx) => {
+      fileToQueueId.set(file, newQueueItems[idx].id);
+    });
+
     // ── Separate CV files (PDF/DOCX/DOC/TXT) from spreadsheets ──────────────
     const cvExtensions = new Set(['pdf', 'docx', 'doc', 'txt']);
     const cvFiles     = files.filter(f => cvExtensions.has(f.name.split('.').pop()?.toLowerCase() ?? ''));
     const otherFiles  = files.filter(f => !cvExtensions.has(f.name.split('.').pop()?.toLowerCase() ?? ''));
 
     // Non-CV files (CSV, XLSX) process individually as before
-    otherFiles.forEach((file, idx) => {
-      const queueItem = newQueueItems[files.indexOf(file)];
-      processFile(file, queueItem.id);
+    otherFiles.forEach((file) => {
+      const queueId = fileToQueueId.get(file)!;
+      processFile(file, queueId);
     });
 
     // CV files go to the concurrent batch endpoint when there are any
     if (cvFiles.length > 0) {
-      processCvBatch(cvFiles, newQueueItems.filter(qi =>
-        cvFiles.some(f => f.name === qi.fileName)
-      ));
+      processCvBatch(cvFiles, fileToQueueId);
     }
   };
 
   // ── Concurrent batch upload for CV files (PDF / DOCX / DOC / TXT) ──────────
-  const processCvBatch = async (files: File[], queueItems: QueueItem[]) => {
+  const processCvBatch = async (files: File[], fileToQueueId: Map<File, string>) => {
     if (!activeRequisition) return;
 
+    // Collect all queue item IDs for this batch
+    const queueIds = files.map(f => fileToQueueId.get(f)!);
+
     // Mark all as uploading immediately so the user sees instant feedback
-    queueItems.forEach(qi => {
+    queueIds.forEach(qid => {
       setQueue(prev => prev.map(item =>
-        item.id === qi.id ? { ...item, progress: 20, status: 'extracting' } : item
+        item.id === qid ? { ...item, progress: 20, status: 'extracting' } : item
       ));
     });
 
     try {
       const formData = new FormData();
-      files.forEach(f => formData.append('files[]', f));
+      // Generate a unique client_id per file for reliable result matching
+      const clientIdToQueueId = new Map<string, string>();
+      files.forEach(f => {
+        const clientId = crypto.randomUUID();
+        clientIdToQueueId.set(clientId, fileToQueueId.get(f)!);
+        formData.append('files[]', f);
+        formData.append('client_ids[]', clientId);
+      });
       formData.append('target_domain',         activeRequisition.target_domain);
       formData.append('requisition_id',        String(activeRequisition.id));
       formData.append('job_description_text',  activeRequisition.job_description_text);
 
       // Mark all as scoring while we wait for the backend
-      queueItems.forEach(qi => {
+      queueIds.forEach(qid => {
         setQueue(prev => prev.map(item =>
-          item.id === qi.id ? { ...item, progress: 60, status: 'scoring' } : item
+          item.id === qid ? { ...item, progress: 60, status: 'scoring' } : item
         ));
       });
 
@@ -131,9 +145,9 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
 
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({ error: 'Unknown server error' }));
-        queueItems.forEach(qi => {
+        queueIds.forEach(qid => {
           setQueue(prev => prev.map(item =>
-            item.id === qi.id ? { ...item, progress: 100, status: 'error' } : item
+            item.id === qid ? { ...item, progress: 100, status: 'failed' } : item
           ));
         });
         console.error('Batch upload failed:', err);
@@ -144,7 +158,7 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
       const parsedCandidates: Candidate[] = [];
 
       if (resData.candidates && resData.candidates.length > 0) {
-        resData.candidates.forEach((cand: any, idx: number) => {
+        resData.candidates.forEach((cand: any) => {
           const pd = cand.parsedData || {};
           const candidate: Candidate = {
             id:                        pd.id        || Math.floor(Math.random() * 1000000),
@@ -168,11 +182,12 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
           };
           parsedCandidates.push(candidate);
 
-          // Match result back to a queue item by index or filename
-          const qi = queueItems[idx] || queueItems[0];
-          if (qi) {
+          // Match result back to a queue item by client_id (order-independent)
+          const clientId = cand.client_id || pd.client_id;
+          const matchedQueueId = clientId ? clientIdToQueueId.get(clientId) : undefined;
+          if (matchedQueueId) {
             setQueue(prev => prev.map(item =>
-              item.id === qi.id
+              item.id === matchedQueueId
                 ? { ...item, progress: 100, status: 'completed', parsedData: candidate }
                 : item
             ));
@@ -183,9 +198,9 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
       }
     } catch (err: any) {
       console.error('Batch upload error:', err);
-      queueItems.forEach(qi => {
+      queueIds.forEach(qid => {
         setQueue(prev => prev.map(item =>
-          item.id === qi.id ? { ...item, progress: 100, status: 'error' } : item
+          item.id === qid ? { ...item, progress: 100, status: 'failed' } : item
         ));
       });
     }
@@ -289,43 +304,107 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
         return;
       }
 
-      // ── Excel path (unchanged) ──────────────────────────────────────────────
+      // ── Excel path — backend AI scoring with local fallback ──────────────────
       if (fileExt === 'xlsx' || fileExt === 'xls') {
         updateProgress(20, 'extracting');
         const data = await file.arrayBuffer();
         const workbook = XLSX.read(data, { type: 'array' });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(worksheet) as any[];
-        updateProgress(50, 'scoring');
+        updateProgress(40, 'scoring');
 
-        const parsedCandidates: Candidate[] = [];
-        for (let i = 0; i < rows.length; i++) {
-          const row = rows[i];
+        // Parse columns from each row
+        const rowData = rows.map((row, i) => {
           const getVal = (aliases: string[]) => {
             const match = Object.keys(row).find(key => aliases.includes(key.toUpperCase().replace(/[\s._-]/g, '')));
             return match ? String(row[match]).trim() : '';
           };
-          const fullName = getVal(['NAME', 'FULLNAME', 'CANDIDATENAME', 'APPLICANTNAME']) || `Candidate #${i + 1}`;
-          const position = getVal(['POSITION', 'ROLE', 'FIELD', 'JOBTITLE']) || activeRequisition?.job_title || '';
-          const phone = getVal(['CONTACTNO', 'PHONE', 'PHONENO', 'MOBILE']) || 'N/A';
-          const email = getVal(['MAILID', 'EMAIL', 'EMAILID', 'EMAILADDRESS']) || 'N/A';
-          const excelRemarks = getVal(['REMARKS', 'NOTES', 'COMMENT', 'FEEDBACK']) || '';
-          const screenResult = calculateLocalScreening(
-            `Role: ${position}. ${excelRemarks}. Experience in ${activeRequisition?.target_domain}`,
-            activeRequisition!
-          );
+          return {
+            fullName: getVal(['NAME', 'FULLNAME', 'CANDIDATENAME', 'APPLICANTNAME']) || `Candidate #${i + 1}`,
+            position: getVal(['POSITION', 'ROLE', 'FIELD', 'JOBTITLE']) || activeRequisition?.job_title || '',
+            phone: getVal(['CONTACTNO', 'PHONE', 'PHONENO', 'MOBILE']) || 'N/A',
+            email: getVal(['MAILID', 'EMAIL', 'EMAILID', 'EMAILADDRESS']) || 'N/A',
+            excelRemarks: getVal(['REMARKS', 'NOTES', 'COMMENT', 'FEEDBACK']) || '',
+            experience: getVal(['EXPERIENCE', 'TOTALEXPERIENCE', 'YEARSOFEXPERIENCE', 'EXPYEARS']) || '',
+            skills: getVal(['SKILLS', 'KEYSKILLS', 'TECHNICALSKILLS', 'COMPETENCIES']) || '',
+          };
+        });
+
+        // Score each row via backend, falling back to local heuristic on failure
+        const scoringPromises = rowData.map(async (rd) => {
+          const candidateText = [
+            `Name: ${rd.fullName}`,
+            rd.position ? `Position/Role: ${rd.position}` : '',
+            rd.experience ? `Experience: ${rd.experience}` : '',
+            rd.skills ? `Skills: ${rd.skills}` : '',
+            rd.excelRemarks ? `Remarks: ${rd.excelRemarks}` : '',
+            activeRequisition?.target_domain ? `Domain context: ${activeRequisition.target_domain}` : '',
+          ].filter(Boolean).join('. ');
+
+          try {
+            const response = await fetch('http://localhost:5000/api/v1/screen-candidate', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                candidate_text: candidateText,
+                target_domain: activeRequisition!.target_domain,
+                job_description_text: activeRequisition!.job_description_text,
+                file_hint: rd.fullName,
+              })
+            });
+            if (!response.ok) throw new Error('Backend scoring failed');
+            const resJson = await response.json();
+            return {
+              source: 'backend' as const,
+              rd,
+              scored: resJson,
+            };
+          } catch {
+            // Fallback to local screening
+            const localScreen = calculateLocalScreening(candidateText, activeRequisition!);
+            return {
+              source: 'local' as const,
+              rd,
+              scored: {
+                full_name: rd.fullName,
+                email: rd.email,
+                phone: rd.phone,
+                total_experience_years: localScreen.totalExperience,
+                relevant_experience_years: localScreen.relevantExperience,
+                match_score: localScreen.score,
+                skills_matrix: localScreen.skills,
+                specialization_tags: localScreen.tags,
+                industry_remarks: localScreen.remarks,
+              },
+            };
+          }
+        });
+
+        const results = await Promise.allSettled(scoringPromises);
+        updateProgress(85, 'scoring');
+
+        const parsedCandidates: Candidate[] = [];
+        for (const result of results) {
+          if (result.status !== 'fulfilled') continue;
+          const { rd, scored, source } = result.value;
+          const remarksPrefix = rd.excelRemarks ? `${rd.excelRemarks} | ` : '';
+          const sourceTag = source === 'local' ? ' [Scored locally — backend unavailable]' : '';
           parsedCandidates.push({
-            id: Math.floor(Math.random() * 1000000),
+            id: scored.id || Math.floor(Math.random() * 1000000),
             requisition_id: activeRequisition!.id,
-            full_name: fullName, email, phone,
-            passport_number: null,
+            full_name: scored.full_name || rd.fullName,
+            email: scored.email || rd.email,
+            phone: scored.phone || rd.phone,
+            passport_number: scored.passport_number || null,
             current_stage: 'Screening',
-            total_experience_years: screenResult.totalExperience,
-            relevant_experience_years: screenResult.relevantExperience,
-            match_score: screenResult.score,
-            skills_matrix: screenResult.skills,
-            specialization_tags: screenResult.tags,
-            industry_remarks: excelRemarks ? `${excelRemarks} | ${screenResult.remarks}` : screenResult.remarks,
+            total_experience_years: scored.total_experience_years || 0,
+            relevant_experience_years: scored.relevant_experience_years || 0,
+            match_score: scored.match_score || 0,
+            skills_matrix: scored.skills_matrix || [],
+            specialization_tags: scored.specialization_tags || [],
+            industry_remarks: `${remarksPrefix}${scored.industry_remarks || ''}${sourceTag}`,
+            eligible: scored.eligible,
+            veto_reason: scored.veto_reason || null,
             created_at: new Date().toISOString()
           });
         }
@@ -722,10 +801,16 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
     const cleanText = text.toLowerCase();
     const domainTaxonomy: Record<TargetDomain, string[]> = {
       'Oil & Gas': ['petroleum', 'drilling', 'refinery', 'offshore', 'pipeline', 'hydrocarbon', 'gas', 'hse', 'reservoir', 'piping'],
-      'Railway': ['locomotive', 'rolling stock', 'signaling', 'track', 'rail', 'transit', 'metro', 'derailment', 'bogie'],
-      'Electrical/Testing': ['transformer', 'relay', 'switchgear', 'gis', 'voltage', 'scada', 'ct', 'vt', 'testing', 'substation'],
-      'Information Technology': ['react', 'typescript', 'javascript', 'python', 'flask', 'software', 'database', 'sql', 'git', 'backend'],
-      'Healthcare': ['clinical', 'nursing', 'medical', 'hospital', 'patient', 'health', 'surgeon', 'healthcare', 'diagnosis']
+      'EPC': ['epc', 'procurement', 'commissioning', 'turnkey', 'contractor', 'lump sum', 'piping', 'fabrication', 'construction management', 'project delivery'],
+      'Power Plants': ['transformer', 'relay', 'switchgear', 'gis', 'voltage', 'scada', 'ct', 'vt', 'testing', 'substation'],
+      'Engineering Services': ['react', 'typescript', 'javascript', 'python', 'flask', 'software', 'database', 'sql', 'git', 'backend'],
+      'Petrochemical': ['petrochemical', 'cracker', 'polymer', 'catalyst', 'distillation', 'ethylene', 'feedstock', 'process safety', 'naphtha', 'polyethylene'],
+      'Construction & Infrastructure': ['construction', 'civil', 'structural', 'concrete', 'foundation', 'project', 'site', 'scaffolding'],
+      'Energy': ['renewable', 'solar', 'wind', 'energy', 'battery', 'storage', 'grid', 'photovoltaic', 'biomass', 'decarbonization'],
+      'Hospitality': ['hotel', 'hospitality', 'catering', 'food', 'beverage', 'guest', 'housekeeping'],
+      'Facilities Management': ['facilities', 'maintenance', 'hvac', 'plumbing', 'janitorial', 'fm', 'bms', 'pest control', 'landscaping'],
+      'Maritime & Shipping': ['vessel', 'marine', 'shipping', 'port', 'cargo', 'seafarer', 'nautical', 'offshore'],
+      'Manufacturing': ['manufacturing', 'production', 'assembly', 'quality', 'lean', 'iso', 'factory', 'supply chain']
     };
 
     const specsPool = ['13.8KV', '380KV', '765KV', 'HSE Certified', 'Deepwater Drilling', 'ETAP', 'CBTC', 'PLC/SCADA'];
@@ -741,16 +826,21 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
     const extractedSkills = commonSkills.filter(skill => cleanText.includes(skill)).map(s => s.toUpperCase());
 
     let totalExperience = 0;
+    let experienceExtracted = false;
     const expMatches = cleanText.match(/(?:total|overall|work|professional|industry)?\s*experience\s*[:\-]?\s*(\d+)\s*(?:years?|yrs?)/i) 
       || cleanText.match(/(\d+)\+?\s*(?:years?|yrs?)\s+(?:of\s+)?(?:total|overall|work|professional|industry)?\s*experience/i);
       
     if (expMatches) {
       totalExperience = parseInt(expMatches[1], 10);
+      experienceExtracted = true;
     } else {
       const allMatches = cleanText.match(/\b(\d+)\+?\s*(?:years?|yrs?)\b/g);
       if (allMatches && allMatches.length > 0) {
         const parsedVals = allMatches.map(m => parseInt(m, 10)).filter(v => v > 0 && v < 50);
-        totalExperience = parsedVals.length > 0 ? Math.max(...parsedVals) : 7;
+        if (parsedVals.length > 0) {
+          totalExperience = Math.max(...parsedVals);
+          experienceExtracted = true;
+        }
       } else {
         const years = cleanText.match(/\b(20[0-2][0-9]|19[8-9][0-9])\b/g)?.map(y => parseInt(y, 10));
         if (years && years.length > 0) {
@@ -760,9 +850,10 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
             maxYear = Math.max(maxYear, 2026);
           }
           const diff = maxYear - minYear;
-          totalExperience = (diff > 0 && diff < 45) ? diff : 7;
-        } else {
-          totalExperience = 7;
+          if (diff > 0 && diff < 45) {
+            totalExperience = diff;
+            experienceExtracted = true;
+          }
         }
       }
     }
@@ -778,7 +869,7 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
       return acc;
     }, {} as Record<TargetDomain, number>);
 
-    let candidatePrimaryDomain: TargetDomain = 'Information Technology';
+    let candidatePrimaryDomain: TargetDomain = 'Engineering Services';
     let maxDensity = 0;
     Object.entries(domainCounts).forEach(([domain, count]) => {
       if (count > maxDensity) { maxDensity = count; candidatePrimaryDomain = domain as TargetDomain; }
@@ -791,13 +882,26 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
 
     if (!isDomainMatch && maxDensity > 2) {
       relevantExperience = Math.max(0, Math.floor(totalExperience * 0.15));
-      score = Math.floor(25 + Math.random() * 10);
+      // Deterministic mismatch score based on target-domain keyword overlap and cross-domain skills
+      const targetKeywords = domainTaxonomy[currentDomain] || [];
+      const targetHits = targetKeywords.reduce((sum, word) => {
+        const regex = new RegExp(`\\b${word}\\b`, 'gi');
+        return sum + (cleanText.match(regex)?.length || 0);
+      }, 0);
+      const crossDomainSkillRatio = extractedSkills.length > 0
+        ? Math.min(1, extractedSkills.length / 10)
+        : 0;
+      score = Math.min(40, Math.floor(15 + targetHits * 3 + crossDomainSkillRatio * 10));
       remarks = `Domain Mismatch. Candidate profile is concentrated in ${candidatePrimaryDomain}. Lacks the required ${currentDomain} domain experience.`;
     } else {
       relevantExperience = totalExperience;
       const skillMatchRatio = extractedSkills.length > 0 ? Math.min(100, extractedSkills.length * 20) : 50;
       score = Math.min(100, Math.floor((skillMatchRatio * 0.6) + (relevantExperience >= 5 ? 40 : relevantExperience * 8)));
       remarks = `Strong Domain Match. Candidate demonstrates alignment with ${currentDomain}. ${relevantExperience} years of relevant industry experience.`;
+    }
+
+    if (!experienceExtracted) {
+      remarks += ' [Note: Experience could not be confidently extracted from text — defaulting to 0 years.]';
     }
 
     return { score, totalExperience, relevantExperience, skills: extractedSkills.length > 0 ? extractedSkills : ['GENERAL CONSULTING'], tags: matchedSpecs, remarks };

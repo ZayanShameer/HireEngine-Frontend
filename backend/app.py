@@ -1054,8 +1054,8 @@ def extract_contacts(text, file_hint=''):
     email_match = re.search(email_regex, text)
     phone_match = re.search(phone_regex, text)
     
-    email = email_match.group(0) if email_match else "N/A"
-    phone = phone_match.group(0) if phone_match else "N/A"
+    email = email_match.group(0) if email_match else ""
+    phone = phone_match.group(0) if phone_match else ""
     
     # Try to parse candidate name from the first 8 non-empty lines.
     lines = [line.strip() for line in text.split('\n') if line.strip()]
@@ -1402,13 +1402,13 @@ def _apply_mandatory_keyword_veto(scored: dict, candidate_text: str, jd_text: st
     cv_lower  = (candidate_text or "").lower()
 
     # Which mandatory keywords appear in THIS job description?
-    required_in_jd = [kw for kw in _MANDATORY_EMPLOYER_KEYWORDS if kw in jd_lower]
+    required_in_jd = [kw for kw in _MANDATORY_EMPLOYER_KEYWORDS if re.search(rf'\b{re.escape(kw)}\b', jd_lower)]
 
     if not required_in_jd:
         return scored  # No regulated requirement in this JD → skip
 
     # Does the CV mention at least one of the required employer/programme names?
-    cv_has_required = any(kw in cv_lower for kw in required_in_jd)
+    cv_has_required = any(re.search(rf'\b{re.escape(kw)}\b', cv_lower) for kw in required_in_jd)
 
     if not cv_has_required:
         missing = ", ".join(k.upper() for k in required_in_jd)
@@ -2101,6 +2101,7 @@ def batch_upload_cv():
     effective_tid = tid if tid is not None else 'admin-tenant'
 
     files         = request.files.getlist('files[]') or request.files.getlist('file')
+    client_ids    = request.form.getlist('client_ids[]')  # parallel list matching files[] by index
     target_domain = request.form.get('target_domain', 'Information Technology')
     req_id        = request.form.get('requisition_id', type=int)
     jd_text       = request.form.get('job_description_text', '')
@@ -2113,8 +2114,8 @@ def batch_upload_cv():
         return jsonify({"error": "Maximum 1,000 files per batch request."}), 400
 
     # ── Save all files to disk first (fast, no AI yet) ──────────────────────
-    pending = []  # list of (save_path, unique_name, original_filename)
-    for f in files:
+    pending = []  # list of (save_path, unique_name, original_filename, client_id)
+    for idx, f in enumerate(files):
         if not f or f.filename == '':
             continue
         ext = os.path.splitext(f.filename)[1].lower()
@@ -2124,14 +2125,15 @@ def batch_upload_cv():
         unique_name   = f"{uuid.uuid4().hex[:8]}_{safe_original}"
         save_path     = os.path.join(UPLOAD_FOLDER, unique_name)
         f.save(save_path)
-        pending.append((save_path, unique_name, f.filename))
+        cid = client_ids[idx] if idx < len(client_ids) else None
+        pending.append((save_path, unique_name, f.filename, cid))
 
     if not pending:
         return jsonify({"error": "No supported files found in request (accepted: .pdf, .docx, .doc, .txt)."}), 400
 
     # ── Process each saved file concurrently ─────────────────────────────────
     def _screen_one(args):
-        save_path, unique_name, orig_name = args
+        save_path, unique_name, orig_name, client_id = args
         try:
             raw_text = extract_text_from_file(save_path)
             scored   = score_candidate_data(raw_text, target_domain, file_hint=orig_name, jd_text=jd_text)
@@ -2201,6 +2203,7 @@ def batch_upload_cv():
             return {
                 'fileName':   unique_name,
                 'fileSize':   file_size,
+                'client_id':  client_id,
                 'parsedData': {**scored, **row_to_candidate(row)},
             }
         except Exception as exc:
@@ -2208,6 +2211,7 @@ def batch_upload_cv():
             return {
                 'fileName':   unique_name,
                 'fileSize':   0,
+                'client_id':  client_id,
                 'error':      str(exc),
                 'parsedData': {'full_name': orig_name, 'match_score': 0, 'eligible': False,
                                'veto_reason': f'Processing error: {exc}'},
