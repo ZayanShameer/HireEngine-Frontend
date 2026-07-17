@@ -1,4 +1,4 @@
-﻿import re
+import re
 
 with open("backend/app.py", "r", encoding="utf-8") as f:
     text = f.read()
@@ -42,6 +42,13 @@ new_domain_taxonomy = """DOMAIN_TAXONOMY = {
         'hotel manager', 'front office manager', 'executive chef', 'sous chef',
         'housekeeping manager', 'restaurant manager', 'guest relations', 'hotel',
         'resort', 'barista', 'f&b', 'housekeeping', 'restaurant'
+    ],
+    'Healthcare': [
+        'nursing', 'medicine', 'pharmacy', 'clinical research', 'healthcare administration',
+        'nursing care', 'registered nurse', 'nurse practitioner', 'clinical nurse',
+        'charge nurse', 'triage nurse', 'er nurse', 'icu nurse', 'staff nurse',
+        'medical practitioner', 'physician', 'healthcare', 'clinical', 'hospital',
+        'patient', 'medical', 'care', 'health'
     ],
     'Facilities Management': [
         'mechanical engineering', 'electrical engineering', 'hvac', 'facility management',
@@ -192,6 +199,8 @@ DOMAIN_ALIASES = {
     'epc': 'EPC', 'procurement': 'EPC',
     'hotel': 'Hospitality', 'resort': 'Hospitality', 'barista': 'Hospitality',
     'restaurant': 'Hospitality', 'catering': 'Hospitality', 'hospitality': 'Hospitality',
+    'healthcare': 'Healthcare', 'nurse': 'Healthcare', 'hospital': 'Healthcare',
+    'medical': 'Healthcare', 'patient': 'Healthcare', 'clinical': 'Healthcare',
 }
 
 SPEC_ALIASES = {

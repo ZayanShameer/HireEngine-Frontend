@@ -3,7 +3,7 @@ import {
   Building2, Users, FileUp, ClipboardList, BarChart3, Plus, 
   MapPin, Database, Layers, CheckCircle2, ArrowRight, Trash2,
   AlertTriangle, TrendingUp, Clock, Target, LogOut, UserCog,
-  Key, Lock, X as XIcon, AlertCircle, Pencil
+  Key, Lock, X as XIcon, AlertCircle, Pencil, Moon, Sun
 } from 'lucide-react';
 import { Requisition, Candidate, HiringStage, TargetDomain } from './types';
 import { BulkUploadQueue } from './components/BulkUploadQueue';
@@ -37,10 +37,33 @@ function useLocalStorage<T>(key: string, initialValue: T): [T, React.Dispatch<Re
   return [storedValue, setValue];
 }
 
+// ── Dark mode hook ────────────────────────────────────────────────
+function useTheme() {
+  const [isDark, setIsDark] = useState<boolean>(() => {
+    const stored = localStorage.getItem('hireengine_theme');
+    if (stored) return stored === 'dark';
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  });
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (isDark) {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
+    }
+    localStorage.setItem('hireengine_theme', isDark ? 'dark' : 'light');
+  }, [isDark]);
+
+  const toggle = useCallback(() => setIsDark(d => !d), []);
+  return { isDark, toggle };
+}
+
 const STAGES: HiringStage[] = ['Screening', 'Shortlist', 'Interviewing', 'Offered', 'Hired', 'Rejected'];
 
 function App() {
-  // ── Authentication ───────────────────────────────────────────
+  // ── Theme ─────────────────────────────────────────────────────
+  const { isDark, toggle: toggleTheme } = useTheme();
   const [authToken, setAuthToken] = useState<string | null>(() => localStorage.getItem('hireengine_token'));
   const [authUser, setAuthUser] = useState<{ name: string; role: string; email: string; tenant_id?: string; is_super_admin?: boolean } | null>(() => {
     try { return JSON.parse(localStorage.getItem('hireengine_user') || 'null'); } catch { return null; }
@@ -105,13 +128,24 @@ function App() {
     return 'dashboard';
   }, [currentPath]);
 
+  // Directory filter — set by clicking metric cards or pipeline rows in the dashboard
+  const [directoryFilter, setDirectoryFilter] = React.useState<{ status?: string; filter?: string } | null>(null);
+
   const setActiveTab = useCallback((tab: 'dashboard' | 'screener' | 'directory' | 'requisitions' | 'users') => {
     if (tab === 'dashboard') {
       navigate('/dashboard');
     } else {
       navigate(`/dashboard/${tab}`);
     }
-  }, [navigate]);
+    // Clear directory filter when switching away from directory
+    if (tab !== 'directory') setDirectoryFilter(null);
+  }, [navigate, setDirectoryFilter]);
+
+  /** Navigate to the Talent Directory with an optional pre-applied filter. */
+  const navigateToDirectory = useCallback((filter?: { status?: string; filter?: string } | null) => {
+    setDirectoryFilter(filter ?? null);
+    navigate('/dashboard/directory');
+  }, [navigate, setDirectoryFilter]);
 
   // Create authenticated apiFetch helper that auto-logs out on 401
   const apiFetch = React.useMemo(() => {
@@ -141,7 +175,7 @@ function App() {
     if (!apiFetch) return;
     setChangingPassword(true);
     try {
-      const res = await apiFetch('http://localhost:5000/api/v1/auth/change-password', {
+      const res = await apiFetch('/api/v1/auth/change-password', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ old_password: oldPassword, new_password: newPassword })
@@ -179,8 +213,8 @@ function App() {
     if (!authToken || !apiFetch) return;
     setDataLoading(true);
     Promise.all([
-      apiFetch('http://localhost:5000/api/v1/requisitions').then(res => res.json()),
-      apiFetch('http://localhost:5000/api/v1/candidates').then(res => res.json())
+      apiFetch('/api/v1/requisitions').then(res => res.json()),
+      apiFetch('/api/v1/candidates').then(res => res.json())
     ])
       .then(([reqData, candData]) => {
         if (Array.isArray(reqData)) setRequisitions(reqData);
@@ -290,8 +324,9 @@ function App() {
       addToast('Please provide a Job Title and Job Description.', 'error');
       return;
     }
+    if (!apiFetch) return;
     try {
-      const res = await fetch('http://localhost:5000/api/v1/requisitions', {
+      const res = await apiFetch('/api/v1/requisitions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -318,8 +353,9 @@ function App() {
   const handleDeleteRequisition = async (reqId: number) => {
     const req = requisitions.find(r => r.id === reqId);
     const cascadeCount = candidates.filter(c => c.requisition_id === reqId).length;
+    if (!apiFetch) return;
     try {
-      await fetch(`http://localhost:5000/api/v1/requisitions/${reqId}`, { method: 'DELETE' });
+      await apiFetch(`/api/v1/requisitions/${reqId}`, { method: 'DELETE' });
       setCandidates(prev => prev.filter(c => c.requisition_id !== reqId));
       setRequisitions(prev => prev.filter(r => r.id !== reqId));
       addToast(`"${req?.job_title}" deleted. ${cascadeCount > 0 ? `${cascadeCount} associated candidate(s) removed.` : ''}`, 'warning');
@@ -332,8 +368,9 @@ function App() {
     e.preventDefault();
     if (!editReqTarget || !editTitle.trim() || !editDesc.trim()) return;
     setEditSaving(true);
+    if (!apiFetch) return;
     try {
-      const res = await fetch(`http://localhost:5000/api/v1/requisitions/${editReqTarget.id}`, {
+      const res = await apiFetch(`/api/v1/requisitions/${editReqTarget.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -360,8 +397,9 @@ function App() {
     setCandidates(prev => prev.map(c => c.id === id ? { ...c, current_stage: stage } : c));
     const cand = candidates.find(c => c.id === id);
     addToast(`${cand?.full_name} moved to "${stage}".`, 'info');
+    if (!apiFetch) return;
     try {
-      await fetch(`http://localhost:5000/api/v1/candidates/${id}`, {
+      await apiFetch(`/api/v1/candidates/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ current_stage: stage })
@@ -374,23 +412,25 @@ function App() {
   const handleDeleteCandidate = async (id: number) => {
     setCandidates(prev => prev.filter(c => c.id !== id));
     addToast('Candidate record deleted.', 'warning');
+    if (!apiFetch) return;
     try {
-      await fetch(`http://localhost:5000/api/v1/candidates/${id}`, { method: 'DELETE' });
+      await apiFetch(`/api/v1/candidates/${id}`, { method: 'DELETE' });
     } catch (err) {
       addToast('Failed to delete candidate on server.', 'error');
     }
   };
 
   const handleCandidatesParsed = async (newCandidates: Candidate[], isRescreen: boolean = false) => {
+    if (!apiFetch) return;
     try {
       for (const cand of newCandidates) {
-        await fetch('http://localhost:5000/api/v1/candidates', {
+        await apiFetch('/api/v1/candidates', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(cand)
         });
       }
-      const res = await fetch('http://localhost:5000/api/v1/candidates');
+      const res = await apiFetch('/api/v1/candidates');
       const updated: Candidate[] = await res.json();
       setCandidates(updated);
       addToast(
@@ -405,8 +445,9 @@ function App() {
   };
 
   const handleClearAllCandidates = async () => {
+    if (!apiFetch) return;
     try {
-      await fetch(`http://localhost:5000/api/v1/candidates/clear?req_id=${activeReqId}`, { method: 'DELETE' });
+      await apiFetch(`/api/v1/candidates/clear?req_id=${activeReqId}`, { method: 'DELETE' });
       setCandidates(prev => prev.filter(c => c.requisition_id !== activeReqId));
       setShowClearConfirm(false);
       addToast('All candidate records cleared from the active requisition.', 'warning');
@@ -577,6 +618,7 @@ function App() {
                   <option value="Construction &amp; Infrastructure">Construction &amp; Infrastructure</option>
                   <option value="Energy">Energy</option>
                   <option value="Hospitality">Hospitality</option>
+                  <option value="Healthcare">Healthcare</option>
                   <option value="Facilities Management">Facilities Management</option>
                   <option value="Maritime &amp; Shipping">Maritime &amp; Shipping</option>
                   <option value="Power Plants">Power Plants</option>
@@ -696,6 +738,16 @@ function App() {
             <span className="user-role">{authUser.role}</span>
           </div>
           <button
+            onClick={toggleTheme}
+            title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+            className="flex-shrink-0 p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--primary)] hover:bg-[var(--primary)]/10 transition-colors cursor-pointer"
+            aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            {isDark
+              ? <Sun className="h-4 w-4" />
+              : <Moon className="h-4 w-4" />}
+          </button>
+          <button
             onClick={() => {
               setPasswordError('');
               setPasswordSuccess('');
@@ -792,7 +844,11 @@ function App() {
                 <>
                   {/* Stat Cards */}
                   <div className="stats-grid">
-                    <div className="stat-card glass primary">
+                    <div
+                      className="stat-card glass primary cursor-pointer hover:border-[var(--primary)]/50 hover:shadow-lg transition-all duration-200"
+                      onClick={() => navigateToDirectory()}
+                      title="View all candidates"
+                    >
                       <div className="stat-header">
                         <span>Total CVs Evaluated</span>
                         <div className="stat-icon-wrapper"><Database className="h-4 w-4" /></div>
@@ -817,7 +873,11 @@ function App() {
                       </div>
                     </div>
 
-                    <div className="stat-card glass warning">
+                    <div
+                      className="stat-card glass warning cursor-pointer hover:border-amber-300/60 hover:shadow-lg transition-all duration-200"
+                      onClick={() => navigateToDirectory({ filter: 'active' })}
+                      title="View active pipeline candidates"
+                    >
                       <div className="stat-header">
                         <span>In Active Pipeline</span>
                         <div className="stat-icon-wrapper"><Users className="h-4 w-4" /></div>
@@ -828,7 +888,11 @@ function App() {
                       </div>
                     </div>
 
-                    <div className="stat-card glass info">
+                    <div
+                      className="stat-card glass info cursor-pointer hover:border-sky-300/60 hover:shadow-lg transition-all duration-200"
+                      onClick={() => navigateToDirectory({ status: 'screening' })}
+                      title="View candidates pending screening"
+                    >
                       <div className="stat-header">
                         <span>Pending Screening</span>
                         <div className="stat-icon-wrapper"><Clock className="h-4 w-4" /></div>
@@ -910,13 +974,27 @@ function App() {
                             'Hired': 'bg-teal-500',
                             'Rejected': 'bg-rose-400',
                           };
+                          const stageBg: Record<HiringStage, string> = {
+                            'Screening': 'hover:bg-slate-50',
+                            'Shortlist': 'hover:bg-emerald-50/60',
+                            'Interviewing': 'hover:bg-sky-50/60',
+                            'Offered': 'hover:bg-[var(--primary-glow)]',
+                            'Hired': 'hover:bg-teal-50/60',
+                            'Rejected': 'hover:bg-rose-50/60',
+                          };
                           return (
-                            <div key={stage} className="flex items-center gap-3">
-                              <span className="text-xs font-semibold text-[var(--text-secondary)] w-24 flex-shrink-0">{stage}</span>
+                            <div
+                              key={stage}
+                              className={`flex items-center gap-3 px-2 py-1.5 rounded-lg cursor-pointer transition-colors duration-150 ${stageBg[stage]} group`}
+                              onClick={() => navigateToDirectory({ status: stage.toLowerCase() })}
+                              title={`View ${stage} candidates`}
+                            >
+                              <span className="text-xs font-semibold text-[var(--text-secondary)] w-24 flex-shrink-0 group-hover:text-[var(--text-primary)] transition-colors">{stage}</span>
                               <div className="flex-1 h-2 bg-black/5 rounded-full overflow-hidden">
                                 <div className={`h-full rounded-full transition-all duration-700 ${stageColor[stage]}`} style={{ width: `${pct}%` }} />
                               </div>
                               <span className="text-xs font-bold text-[var(--text-primary)] w-6 text-right">{count}</span>
+                              <ArrowRight className="h-3 w-3 text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
                             </div>
                           );
                         })}
@@ -969,8 +1047,8 @@ function App() {
             </div>
           )}
 
-          {/* â”€â”€ TAB 2: SCREENER â”€â”€ */}
-          {activeTab === 'screener' && (
+          {/* ── TAB 2: SCREENER ── */}
+          {activeTab === 'screener' && apiFetch && (
             <div className="screener-grid animate-fade-in">
               {/* Left: Job Spec Panel */}
               <div className="job-config-card glass">
@@ -1030,13 +1108,14 @@ function App() {
                   onCandidatesParsed={handleCandidatesParsed}
                   queue={queue}
                   setQueue={setQueue}
+                  apiFetch={apiFetch}
                 />
               </div>
             </div>
           )}
 
-          {/* â”€â”€ TAB 3: DIRECTORY â”€â”€ */}
-          {activeTab === 'directory' && (
+          {/* ── TAB 3: DIRECTORY ── */}
+          {activeTab === 'directory' && apiFetch && (
             <div className="h-full overflow-hidden">
               <CandidateDirectory 
                 candidates={candidates}
@@ -1044,11 +1123,13 @@ function App() {
                 onUpdateCandidateStage={handleUpdateCandidateStage}
                 onDeleteCandidate={handleDeleteCandidate}
                 onNavigateToScreener={() => setActiveTab('screener')}
+                initialFilter={directoryFilter}
+                apiFetch={apiFetch}
               />
             </div>
           )}
 
-          {/* â”€â”€ TAB 4: REQUISITIONS â”€â”€ */}
+          {/* ── TAB 4: REQUISITIONS ── */}
           {activeTab === 'requisitions' && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8 animate-fade-in">
               {/* Create Form */}
@@ -1082,6 +1163,7 @@ function App() {
                       <option value="Construction & Infrastructure">Construction & Infrastructure</option>
                       <option value="Energy">Energy</option>
                       <option value="Hospitality">Hospitality</option>
+                      <option value="Healthcare">Healthcare</option>
                       <option value="Facilities Management">Facilities Management</option>
                       <option value="Maritime & Shipping">Maritime & Shipping</option>
                       <option value="Power Plants">Power Plants</option>

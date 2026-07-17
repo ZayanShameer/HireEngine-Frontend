@@ -6,6 +6,7 @@ export type TargetDomain =
   | 'Construction & Infrastructure' 
   | 'Energy'
   | 'Hospitality'
+  | 'Healthcare'
   | 'Facilities Management'
   | 'Maritime & Shipping' 
   | 'Power Plants' 

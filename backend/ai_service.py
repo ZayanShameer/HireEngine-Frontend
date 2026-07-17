@@ -87,42 +87,144 @@ Candidate Resume Raw Text:
 """
 
         models_to_try = [
-            "gemini-2.5-flash-lite",
-            "gemini-flash-lite-latest",
-            "gemini-flash-latest",
             "gemini-2.5-flash",
-            "gemini-2.5-pro",
-            "gemini-3.5-flash"
+            "gemini-2.5-flash-lite",
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-lite",
+            "gemini-flash-latest"
         ]
         for model_name in models_to_try:
-            for attempt in range(2):
-                try:
-                    response = client.models.generate_content(
-                        model=model_name,
-                        contents=prompt,
-                        config=types.GenerateContentConfig(
-                            response_mime_type="application/json",
-                            temperature=0.1,
-                        ),
-                    )
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        temperature=0.1,
+                    ),
+                )
 
-                    if response.text:
-                        result = json.loads(response.text)
-                        logger.info(f"Precision ATS AI Analysis completed successfully via {model_name}. Name: {result.get('full_name')}, Score: {result.get('match_score', algorithmic_score)}%")
-                        return result
-                    return None
-                except Exception as e:
-                    err_str = str(e)
-                    if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "quota" in err_str.lower():
-                        logger.warning(f"Google Gemini quota limit (429 on {model_name}, attempt {attempt+1}). Pausing 10s for quota refill...")
-                        time.sleep(10)
-                    elif "503" in err_str or "UNAVAILABLE" in err_str:
-                        logger.warning(f"Google Gemini server busy (503 on {model_name}, attempt {attempt+1}). Pausing 3s before retry/fallback...")
-                        time.sleep(3)
-                    else:
-                        logger.warning(f"Google Gemini model {model_name} (attempt {attempt+1}) error: {err_str[:50]}...")
-                        time.sleep(1)
+                if response.text:
+                    result = json.loads(response.text)
+                    logger.info(f"Precision ATS AI Analysis completed successfully via {model_name}. Name: {result.get('full_name')}, Score: {result.get('match_score', algorithmic_score)}%")
+                    return result
+            except Exception as e:
+                err_str = str(e)
+                logger.warning(f"Google Gemini model {model_name} error: {err_str[:80]}...")
+                time.sleep(0.5)
 
+        return None
     except Exception as e:
         logger.error(f"Error calling Google Gemini API during ATS screening: {str(e)}")
         return None
+
+
+def ocr_image_with_gemini(image_bytes: bytes) -> str:
+    """
+    Performs OCR on a single page image using the Google Gemini model.
+    Returns the extracted text, or an empty string on error.
+    """
+    results = ocr_batch_pages_with_gemini([image_bytes])
+    return results[0] if results else ""
+
+
+def ocr_batch_pages_with_gemini(pages_image_bytes: list[bytes]) -> list[str]:
+    """
+    Performs OCR on multiple page images in a SINGLE Gemini API call to avoid
+    rate limits when processing fully-scanned multi-page PDF bundles.
+
+    Each element in pages_image_bytes is a raw PNG byte string for one page.
+    Returns a list of extracted text strings (one per page), in the same order.
+    Pages that fail OCR return empty strings.
+
+    Gemini supports up to ~20 inline image parts per request; we batch in
+    groups of MAX_BATCH_SIZE to stay well within the limit.
+    """
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key or api_key.strip() == "" or api_key.strip() == "YOUR_GEMINI_API_KEY_HERE":
+        logger.warning("ocr_batch_pages_with_gemini: No valid GEMINI_API_KEY found.")
+        return [""] * len(pages_image_bytes)
+
+    MAX_BATCH_SIZE = 8   # pages per Gemini call — safe limit for inline images
+    all_texts: list[str] = []
+
+    try:
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(api_key=api_key.strip())
+
+        for batch_start in range(0, len(pages_image_bytes), MAX_BATCH_SIZE):
+            batch = pages_image_bytes[batch_start: batch_start + MAX_BATCH_SIZE]
+            n = len(batch)
+
+            # Build a multi-image content payload
+            image_parts = [
+                types.Part.from_bytes(data=img, mime_type="image/png")
+                for img in batch
+            ]
+
+            instructions = (
+                f"You are receiving {n} scanned document page(s) from a single PDF. "
+                f"Perform accurate OCR on each page. "
+                f"Output the transcribed text for each page, separated by the marker '===PAGE_BREAK==='. "
+                f"Maintain the original text structure. Return ONLY the transcribed text and page break markers, "
+                f"with no introductory text, explanations, or comments."
+            )
+
+            contents = image_parts + [instructions]
+
+            response_text = None
+            models_to_try = [
+                "gemini-2.5-flash",
+                "gemini-2.5-flash-lite",
+                "gemini-2.0-flash",
+                "gemini-2.0-flash-lite",
+                "gemini-flash-latest"
+            ]
+            for model_name in models_to_try:
+                try:
+                    logger.info(f"ocr_batch_pages_with_gemini: attempting OCR via {model_name}...")
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=contents
+                    )
+                    if response.text and response.text.strip():
+                        response_text = response.text
+                        logger.info(f"ocr_batch_pages_with_gemini: successfully OCR'd batch via {model_name}")
+                        break
+                    else:
+                        logger.warning(f"ocr_batch_pages_with_gemini: model {model_name} returned empty text.")
+                except Exception as model_err:
+                    logger.warning(f"ocr_batch_pages_with_gemini: model {model_name} failed: {str(model_err)[:100]}")
+                time.sleep(0.5)
+
+            if response_text:
+                # Split by our page break marker — one section per page
+                sections = response_text.split("===PAGE_BREAK===")
+                for i, section in enumerate(sections[:n]):
+                    all_texts.append(section.strip())
+                # If Gemini returned fewer sections than pages, pad with empty strings
+                for _ in range(n - len(sections)):
+                    all_texts.append("")
+            else:
+                all_texts.extend([""] * n)
+
+            logger.info(
+                f"ocr_batch_pages_with_gemini: processed batch starting at {batch_start+1} "
+                f"({sum(len(t) for t in all_texts[-n:])} chars total)"
+            )
+
+            # Brief pause between batches to respect rate limits
+            if batch_start + MAX_BATCH_SIZE < len(pages_image_bytes):
+                time.sleep(0.5)
+
+    except Exception as e:
+        logger.error(f"ocr_batch_pages_with_gemini error: {str(e)}")
+        # Return what we have so far, pad the rest with empty strings
+        while len(all_texts) < len(pages_image_bytes):
+            all_texts.append("")
+
+    return all_texts
+
+

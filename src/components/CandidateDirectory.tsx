@@ -8,18 +8,25 @@ import {
 import confetti from 'canvas-confetti';
 import { Candidate, HiringStage, TargetDomain, Requisition, CandidateNote } from '../types';
 
+interface DirectoryFilter {
+  status?: string;   // e.g. 'screening' | 'shortlist' | 'interviewing' | 'offered' | 'hired' | 'rejected'
+  filter?: string;   // e.g. 'active'
+}
+
 interface CandidateDirectoryProps {
   candidates: Candidate[];
   requisitions: Requisition[];
   onUpdateCandidateStage: (id: number, stage: HiringStage) => void;
   onDeleteCandidate: (id: number) => void;
   onNavigateToScreener: () => void;
+  initialFilter?: DirectoryFilter | null;
+  apiFetch: import('../lib/apiFetch').ApiFetch;
 }
 
 const STAGES: HiringStage[] = ['Screening', 'Shortlist', 'Interviewing', 'Offered', 'Hired', 'Rejected'];
 const DOMAINS: TargetDomain[] = [
   'Oil & Gas', 'Petrochemical', 'Construction & Infrastructure',
-  'Energy', 'Hospitality', 'Facilities Management', 'Maritime & Shipping',
+  'Energy', 'Hospitality', 'Healthcare', 'Facilities Management', 'Maritime & Shipping',
   'Power Plants', 'Engineering Services', 'Manufacturing', 'EPC'
 ];
 const SPECIALIZATIONS = [
@@ -30,13 +37,26 @@ const SPECIALIZATIONS = [
   'Boiler Operator', 'DCS', 'SolidWorks', 'ANSYS', 'ISO 9001', 'CQE'
 ];
 
+const ACTIVE_STAGES: HiringStage[] = ['Shortlist', 'Interviewing', 'Offered', 'Hired'];
+
 export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
   candidates,
   requisitions,
   onUpdateCandidateStage,
   onDeleteCandidate,
-  onNavigateToScreener
+  onNavigateToScreener,
+  initialFilter,
+  apiFetch,
 }) => {
+  // Active dashboard filter (seeded from initialFilter, dismissible by user)
+  const [activeQuickFilter, setActiveQuickFilter] = React.useState<DirectoryFilter | null>(
+    initialFilter ?? null
+  );
+
+  // Sync if parent passes a new initialFilter (e.g. clicking another metric card)
+  React.useEffect(() => {
+    setActiveQuickFilter(initialFilter ?? null);
+  }, [initialFilter]);
   // Navigation & View Toggles
   const [viewMode, setViewMode] = useState<'list' | 'kanban'>('list');
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
@@ -60,14 +80,14 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
     }
     setShowPreview(false);
     setLoadingNotes(true);
-    fetch(`http://localhost:5000/api/v1/candidates/${selectedCandidate.id}/notes`)
+    apiFetch(`/api/v1/candidates/${selectedCandidate.id}/notes`)
       .then(res => res.json())
       .then(data => {
         if (Array.isArray(data)) setNotes(data);
         setLoadingNotes(false);
       })
       .catch(() => setLoadingNotes(false));
-  }, [selectedCandidate?.id]);
+  }, [selectedCandidate?.id, apiFetch]);
 
   const handleAddNote = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,7 +97,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
       const userObj = userStr ? JSON.parse(userStr) : null;
       const author_email = userObj?.email || userObj?.name || 'Recruiter';
       
-      const res = await fetch(`http://localhost:5000/api/v1/candidates/${selectedCandidate.id}/notes`, {
+      const res = await apiFetch(`/api/v1/candidates/${selectedCandidate.id}/notes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ author_email, note_text: newNoteText })
@@ -95,7 +115,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
   const handleDeleteNote = async (noteId: number) => {
     if (!selectedCandidate) return;
     try {
-      const res = await fetch(`http://localhost:5000/api/v1/candidates/${selectedCandidate.id}/notes/${noteId}`, {
+      const res = await apiFetch(`/api/v1/candidates/${selectedCandidate.id}/notes/${noteId}`, {
         method: 'DELETE'
       });
       if (res.ok) {
@@ -112,11 +132,11 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
       return;
     }
     setCvExists(null);
-    fetch(`http://localhost:5000/api/v1/cv/${selectedCandidate.cv_file_name}/exists`)
+    apiFetch(`/api/v1/cv/${selectedCandidate.cv_file_name}/exists`)
       .then(res => res.json())
       .then(data => setCvExists(data.exists))
       .catch(() => setCvExists(false));
-  }, [selectedCandidate?.cv_file_name]);
+  }, [selectedCandidate?.cv_file_name, apiFetch]);
 
   // Faceted Search Filters State
   const [searchQuery, setSearchQuery] = useState('');
@@ -172,6 +192,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
     setMagicQuery('');
     setMagicResults([]);
     setMagicSignals(null);
+    setActiveQuickFilter(null);
   };
 
   // Magic Search â€” debounced call to backend
@@ -186,7 +207,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
     setMagicLoading(true);
     magicDebounce.current = setTimeout(async () => {
       try {
-        const resp = await fetch('http://localhost:5000/api/v1/semantic-search', {
+        const resp = await apiFetch('/api/v1/semantic-search', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ query, candidates })
@@ -203,7 +224,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
         setMagicLoading(false);
       }
     }, 500);
-  }, [candidates]);
+  }, [candidates, apiFetch]);
 
   const handleMagicQueryChange = (q: string) => {
     setMagicQuery(q);
@@ -240,6 +261,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
       if (d === 'Construction & Infrastructure' && (remarks.includes('civil') || remarks.includes('structural') || remarks.includes('mep') || remarks.includes('construction') || remarks.includes('quantity surveyor') || remarks.includes('site engineer'))) return true;
       if (d === 'Energy' && (remarks.includes('renewable') || remarks.includes('solar') || remarks.includes('wind') || remarks.includes('grid') || remarks.includes('power systems') || remarks.includes('energy'))) return true;
       if (d === 'Hospitality' && (remarks.includes('hotel') || remarks.includes('resort') || remarks.includes('barista') || remarks.includes('f&b') || remarks.includes('housekeeping') || remarks.includes('restaurant'))) return true;
+      if (d === 'Healthcare' && (remarks.includes('healthcare') || remarks.includes('clinical') || remarks.includes('nurse') || remarks.includes('hospital') || remarks.includes('patient') || remarks.includes('medical') || remarks.includes('care') || remarks.includes('nursing'))) return true;
       if (d === 'Facilities Management' && (remarks.includes('facilities') || remarks.includes('hvac') || remarks.includes('building maintenance') || remarks.includes('property management') || remarks.includes('fm'))) return true;
       if (d === 'Maritime & Shipping' && (remarks.includes('maritime') || remarks.includes('shipping') || remarks.includes('vessel') || remarks.includes('marine') || remarks.includes('port') || remarks.includes('seafarer'))) return true;
       if (d === 'Power Plants' && (remarks.includes('power plant') || remarks.includes('turbine') || remarks.includes('boiler') || remarks.includes('generator') || remarks.includes('dcs') || remarks.includes('commissioning'))) return true;
@@ -257,7 +279,18 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
     // 4. Match Score Range Match
     const matchScore = candidate.match_score >= minScore && candidate.match_score <= maxScore;
 
-    return matchSearch && matchDomain && matchSpec && matchScore;
+    // 5. Dashboard quick-filter (from metric card / pipeline click)
+    let matchQuickFilter = true;
+    if (activeQuickFilter) {
+      if (activeQuickFilter.filter === 'active') {
+        matchQuickFilter = ACTIVE_STAGES.includes(candidate.current_stage as HiringStage);
+      } else if (activeQuickFilter.status) {
+        matchQuickFilter =
+          candidate.current_stage.toLowerCase() === activeQuickFilter.status.toLowerCase();
+      }
+    }
+
+    return matchSearch && matchDomain && matchSpec && matchScore && matchQuickFilter;
   });
 
   const toggleSelectAll = () => {
@@ -399,8 +432,27 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
             </button>
           </div>
 
-          <div className="text-sm text-[var(--text-secondary)] font-medium">
-            Found <span className="font-bold text-[var(--text-primary)] text-base">{filteredCandidates.length}</span> candidates
+          <div className="flex items-center gap-3">
+            {/* Dashboard quick-filter badge */}
+            {activeQuickFilter && (
+              <div className="flex items-center gap-1.5 bg-[var(--primary-glow)] border border-[var(--primary)]/30 px-3 py-1.5 rounded-full animate-fade-in">
+                <span className="text-xs font-bold text-[var(--primary)] uppercase tracking-wider">
+                  {activeQuickFilter.filter === 'active'
+                    ? '⚡ Active Pipeline'
+                    : `Stage: ${activeQuickFilter.status?.charAt(0).toUpperCase()}${activeQuickFilter.status?.slice(1)}`}
+                </span>
+                <button
+                  onClick={() => setActiveQuickFilter(null)}
+                  className="ml-1 text-[var(--primary)] hover:text-rose-500 transition-colors cursor-pointer"
+                  title="Clear filter"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            )}
+            <div className="text-sm text-[var(--text-secondary)] font-medium">
+              Found <span className="font-bold text-[var(--text-primary)] text-base">{filteredCandidates.length}</span> candidates
+            </div>
           </div>
         </div>
 
@@ -906,7 +958,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                       setSummaryBullets(null);
                       setSummaryError(null);
                       try {
-                        const res = await fetch(`http://localhost:5000/api/v1/candidates/${selectedCandidate.id}/instant-summary`, { method: 'POST' });
+                        const res = await apiFetch(`/api/v1/candidates/${selectedCandidate.id}/instant-summary`, { method: 'POST' });
                         const data = await res.json();
                         if (!res.ok) throw new Error(data.error || 'Failed to generate summary.');
                         setSummaryBullets(data.bullets || []);
@@ -1038,7 +1090,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                           onClick={async (e) => {
                             e.preventDefault();
                             try {
-                              const res = await fetch(`http://localhost:5000/api/v1/cv/${selectedCandidate.cv_file_name}`);
+                              const res = await apiFetch(`/api/v1/cv/${selectedCandidate.cv_file_name}`);
                               if (!res.ok) {
                                 alert('CV file not found on the server (it may have been deleted or expired from disk).');
                                 return;
@@ -1079,7 +1131,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                       {showPreview && (
                         <div className="w-full h-[500px] border border-slate-300 rounded-[var(--radius-md)] overflow-hidden shadow-inner bg-slate-100 mt-1">
                           <iframe
-                            src={`http://localhost:5000/api/v1/cv/${selectedCandidate.cv_file_name}#view=FitH`}
+                            src={`/api/v1/cv/${selectedCandidate.cv_file_name}#view=FitH`}
                             className="w-full h-full"
                             title="CV Inline Preview"
                           />

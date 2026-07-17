@@ -8,6 +8,7 @@ interface BulkUploadQueueProps {
   onCandidatesParsed: (candidates: Candidate[], isRescreen?: boolean) => Promise<void> | void;
   queue: QueueItem[];
   setQueue: React.Dispatch<React.SetStateAction<QueueItem[]>>;
+  apiFetch: import('../lib/apiFetch').ApiFetch;
 }
 
 // Manual entry form initial state
@@ -25,7 +26,8 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
   activeRequisition,
   onCandidatesParsed,
   queue,
-  setQueue
+  setQueue,
+  apiFetch,
 }) => {
   // queue & setQueue are lifted to App.tsx for localStorage persistence
   const [isDragActive, setIsDragActive] = useState(false);
@@ -86,21 +88,11 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
       fileToQueueId.set(file, newQueueItems[idx].id);
     });
 
-    // ── Separate CV files (PDF/DOCX/DOC/TXT) from spreadsheets ──────────────
-    const cvExtensions = new Set(['pdf', 'docx', 'doc', 'txt']);
-    const cvFiles     = files.filter(f => cvExtensions.has(f.name.split('.').pop()?.toLowerCase() ?? ''));
-    const otherFiles  = files.filter(f => !cvExtensions.has(f.name.split('.').pop()?.toLowerCase() ?? ''));
-
-    // Non-CV files (CSV, XLSX) process individually as before
-    otherFiles.forEach((file) => {
+    // Process all files individually for real-time updates and robust error isolation
+    files.forEach((file) => {
       const queueId = fileToQueueId.get(file)!;
       processFile(file, queueId);
     });
-
-    // CV files go to the concurrent batch endpoint when there are any
-    if (cvFiles.length > 0) {
-      processCvBatch(cvFiles, fileToQueueId);
-    }
   };
 
   // ── Concurrent batch upload for CV files (PDF / DOCX / DOC / TXT) ──────────
@@ -138,7 +130,7 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
         ));
       });
 
-      const resp = await fetch('http://localhost:5000/api/v1/batch-upload-cv', {
+      const resp = await apiFetch('/api/v1/batch-upload-cv', {
         method: 'POST',
         body: formData,
       });
@@ -342,7 +334,7 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
           ].filter(Boolean).join('. ');
 
           try {
-            const response = await fetch('http://localhost:5000/api/v1/screen-candidate', {
+            const response = await apiFetch('/api/v1/screen-candidate', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -441,7 +433,7 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
         formData.append('job_description_text', activeRequisition!.job_description_text);
 
         updateProgress(40, 'extracting');
-        const uploadResp = await fetch('http://localhost:5000/api/v1/upload-cv', {
+        const uploadResp = await apiFetch('/api/v1/upload-cv', {
           method: 'POST',
           body: formData
         });
@@ -480,7 +472,7 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
 
         updateProgress(65, 'scoring');
         try {
-          const response = await fetch('http://localhost:5000/api/v1/screen-candidate', {
+          const response = await apiFetch('/api/v1/screen-candidate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
@@ -808,6 +800,7 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
       'Construction & Infrastructure': ['construction', 'civil', 'structural', 'concrete', 'foundation', 'project', 'site', 'scaffolding'],
       'Energy': ['renewable', 'solar', 'wind', 'energy', 'battery', 'storage', 'grid', 'photovoltaic', 'biomass', 'decarbonization'],
       'Hospitality': ['hotel', 'hospitality', 'catering', 'food', 'beverage', 'guest', 'housekeeping'],
+      'Healthcare': ['healthcare', 'nurse', 'clinical', 'hospital', 'patient', 'medical', 'care', 'nursing', 'nursing care', 'health'],
       'Facilities Management': ['facilities', 'maintenance', 'hvac', 'plumbing', 'janitorial', 'fm', 'bms', 'pest control', 'landscaping'],
       'Maritime & Shipping': ['vessel', 'marine', 'shipping', 'port', 'cargo', 'seafarer', 'nautical', 'offshore'],
       'Manufacturing': ['manufacturing', 'production', 'assembly', 'quality', 'lean', 'iso', 'factory', 'supply chain']

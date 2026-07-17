@@ -53,10 +53,48 @@
   --transition-normal: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* ── DARK MODE TOKENS ──────────────────────────────────────────── */
+/* Applied when the <html> element has class="dark"                 */
+.dark {
+  --bg-main:           #0f0e0d;
+  --bg-surface:        rgba(26, 22, 19, 0.95);
+  --bg-surface-hover:  #2a231e;
+  --bg-sidebar:        #161210;
+
+  --border-light:      #2e2620;
+  --border-focus:      #a88a72;
+
+  --text-primary:      #f0ebe6;
+  --text-secondary:    #c4b5a8;
+  --text-muted:        #7a6b60;
+
+  /* Accent stays on-brand but pumped up for dark bg contrast */
+  --primary:           #c4956a;
+  --primary-gradient:  linear-gradient(135deg, #d4a87a 0%, #8c6844 100%);
+  --primary-glow:      rgba(196, 149, 106, 0.12);
+  --primary-light:     #3a2c22;
+
+  --success:           #4ade80;
+  --success-glow:      rgba(74, 222, 128, 0.10);
+
+  --warning:           #fbbf24;
+  --warning-glow:      rgba(251, 191, 36, 0.10);
+
+  --danger:            #f87171;
+  --danger-glow:       rgba(248, 113, 113, 0.10);
+
+  --info:              #60a5fa;
+  --info-glow:         rgba(96, 165, 250, 0.10);
+
+  --shadow-sm:         0 2px 8px -2px rgba(0, 0, 0, 0.4);
+  --shadow-md:         0 10px 25px -5px rgba(0, 0, 0, 0.5);
+  --shadow-lg:         0 20px 40px -10px rgba(0, 0, 0, 0.6);
+  --shadow-glow:       0 0 25px 0 rgba(196, 149, 106, 0.15);
+}
+
 * {
   box-sizing: border-box;
 }
-
 
 body {
   font-family: var(--font-sans);
@@ -68,6 +106,7 @@ body {
   overflow: hidden;
   height: 100vh;
   width: 100vw;
+  transition: background-color 0.25s ease, color 0.25s ease;
 }
 
 /* Custom Scrollbars */
@@ -81,7 +120,7 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.15);
+  background: rgba(128, 100, 80, 0.25);
   border-radius: 4px;
 }
 
@@ -201,6 +240,9 @@ body {
   color: var(--text-primary);
   background: rgba(0, 0, 0, 0.03);
 }
+.dark .nav-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
 
 .nav-item.active {
   color: #fff;
@@ -215,6 +257,9 @@ body {
   align-items: center;
   gap: 12px;
   background: rgba(0, 0, 0, 0.02);
+}
+.dark .sidebar-footer {
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .user-avatar {
@@ -268,6 +313,9 @@ body {
   backdrop-filter: blur(8px);
   z-index: 5;
   flex-shrink: 0;
+}
+.dark .header {
+  background: rgba(15, 14, 13, 0.7);
 }
 
 .header-title {
@@ -325,10 +373,18 @@ body {
   color: var(--text-primary);
   border-color: var(--border-light);
 }
+.dark .btn-secondary {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--border-light);
+}
 
 .btn-secondary:hover {
   background: rgba(0, 0, 0, 0.05);
   border-color: rgba(0, 0, 0, 0.1);
+}
+.dark .btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.12);
 }
 
 /* Dashboard statistics cards */
@@ -474,6 +530,9 @@ body {
   position: relative;
   overflow: hidden;
 }
+.dark .bar-chart-track {
+  background: rgba(255, 255, 255, 0.06);
+}
 
 .bar-chart-fill {
   height: 100%;
@@ -533,12 +592,20 @@ body {
   font-size: 0.88rem;
   transition: var(--transition-fast);
 }
+.dark .form-select, .dark .form-input, .dark .form-textarea {
+  background: rgba(255, 255, 255, 0.03);
+  color-scheme: dark;
+}
 
 .form-select:focus, .form-input:focus, .form-textarea:focus {
   outline: none;
   border-color: var(--primary);
   box-shadow: 0 0 0 2px rgba(140, 111, 86, 0.1);
   background: rgba(0, 0, 0, 0.02);
+}
+.dark .form-select:focus, .dark .form-input:focus, .dark .form-textarea:focus {
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 0 0 2px rgba(196, 149, 106, 0.15);
 }
 
 .weight-slider {
@@ -616,6 +683,9 @@ body {
   align-items: center;
   gap: 10px;
   animation: fadeIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.1) forwards;
+}
+.dark .toast {
+  background: #1e1a16;
 }
 
 .toast.success { border-left-color: var(--success); }
@@ -753,6 +823,10 @@ body {
   font-weight: 500;
   border: 1px solid rgba(0, 0, 0, 0.03);
 }
+.dark .candidate-card-skill-badge {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.06);
+}
 
 .candidate-card-footer {
   border-top: 1px solid var(--border-light);
@@ -828,6 +902,9 @@ body {
   background: rgba(0, 0, 0, 0.02);
   color: var(--text-primary);
 }
+.dark .filter-checkbox-label:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
 
 .filter-checkbox-input {
   accent-color: var(--primary);
@@ -856,11 +933,18 @@ body {
   cursor: pointer;
   transition: all 0.2s;
 }
+.dark .specialization-tag-btn {
+  background: rgba(255, 255, 255, 0.03);
+}
 
 .specialization-tag-btn:hover {
   border-color: rgba(0, 0, 0, 0.1);
   color: var(--text-primary);
   background: rgba(0, 0, 0, 0.03);
+}
+.dark .specialization-tag-btn:hover {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .specialization-tag-btn.active {

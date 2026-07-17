@@ -893,6 +893,13 @@ DOMAIN_TAXONOMY = {
         'housekeeping manager', 'restaurant manager', 'guest relations', 'hotel',
         'resort', 'barista', 'f&b', 'housekeeping', 'restaurant'
     ],
+    'Healthcare': [
+        'nursing', 'medicine', 'pharmacy', 'clinical research', 'healthcare administration',
+        'nursing care', 'registered nurse', 'nurse practitioner', 'clinical nurse',
+        'charge nurse', 'triage nurse', 'er nurse', 'icu nurse', 'staff nurse',
+        'medical practitioner', 'physician', 'healthcare', 'clinical', 'hospital',
+        'patient', 'medical', 'care', 'health'
+    ],
     'Facilities Management': [
         'mechanical engineering', 'electrical engineering', 'hvac', 'facility management',
         'civil engineering', 'ifma cfm', 'fmp', 'leed', 'bms', 'hvac certification',
@@ -1157,6 +1164,7 @@ ADJACENT_DOMAIN_MAP = {
     'Manufacturing':              {'EPC', 'Engineering Services', 'Power Plants', 'Oil & Gas'},
     'Engineering Services':       {'Manufacturing', 'EPC', 'Power Plants', 'Construction & Infrastructure'},
     'Maritime & Shipping':        {'Engineering Services', 'Oil & Gas'},
+    'Healthcare':                 set(),
 }
 
 def score_candidate_data(candidate_text, target_domain='', file_hint='', jd_text=''):
@@ -1524,6 +1532,8 @@ DOMAIN_ALIASES = {
     'epc': 'EPC', 'procurement': 'EPC',
     'hotel': 'Hospitality', 'resort': 'Hospitality', 'barista': 'Hospitality',
     'restaurant': 'Hospitality', 'catering': 'Hospitality', 'hospitality': 'Hospitality',
+    'healthcare': 'Healthcare', 'nurse': 'Healthcare', 'hospital': 'Healthcare',
+    'medical': 'Healthcare', 'patient': 'Healthcare', 'clinical': 'Healthcare',
 }
 
 SPEC_ALIASES = {
@@ -1671,7 +1681,52 @@ def extract_text_from_file(file_path):
         if fitz:
             try:
                 doc = fitz.open(file_path)
-                text = "\n".join([page.get_text() for page in doc])
+                page_count = len(doc)
+
+                # ── Pass 1: extract native text from every page ──────────────
+                pages_text = []
+                image_only_indices = []  # pages that yielded < 40 chars of text
+
+                for idx, page in enumerate(doc):
+                    page_text = page.get_text()
+                    pages_text.append(page_text)
+                    if len(page_text.strip()) < 40:
+                        image_only_indices.append(idx)
+
+                # ── Pass 2: batch-OCR all sparse/image-only pages in one call ─
+                if image_only_indices:
+                    _app_logger.info(
+                        f"PDF '{os.path.basename(file_path)}': {len(image_only_indices)}/{page_count} pages "
+                        f"have sparse text. Rendering and batching for Gemini OCR..."
+                    )
+                    # Render each sparse page to PNG at 150 DPI
+                    rendered_images = []
+                    for idx in image_only_indices:
+                        pix = doc[idx].get_pixmap(dpi=150)
+                        rendered_images.append(pix.tobytes("png"))
+
+                    # Single batch API call — avoid per-page rate-limit hammering
+                    try:
+                        from ai_service import ocr_batch_pages_with_gemini
+                        ocr_texts = ocr_batch_pages_with_gemini(rendered_images)
+
+                        for batch_pos, page_idx in enumerate(image_only_indices):
+                            ocr_text = ocr_texts[batch_pos] if batch_pos < len(ocr_texts) else ""
+                            if ocr_text.strip():
+                                pages_text[page_idx] = f"\n[OCR Text from Page {page_idx+1}]:\n" + ocr_text
+                                _app_logger.info(
+                                    f"OCR success — page {page_idx+1}: {len(ocr_text)} chars extracted."
+                                )
+                            else:
+                                _app_logger.warning(f"OCR returned empty text for page {page_idx+1}.")
+                    except Exception as ocr_err:
+                        _app_logger.warning(f"Batch OCR failed for '{os.path.basename(file_path)}': {ocr_err}")
+
+                text = "\n".join(pages_text)
+                _app_logger.info(
+                    f"PDF extraction complete: {len(text)} total chars "
+                    f"({len(image_only_indices)} pages OCR'd)."
+                )
             except Exception as e:
                 text = f"[Error reading PDF with PyMuPDF: {str(e)}]"
         elif pypdf:

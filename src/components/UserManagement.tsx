@@ -45,7 +45,7 @@ export function UserManagement({ apiFetch, currentUserEmail }: UserManagementPro
     setLoading(true);
     setError('');
     try {
-      const res = await apiFetch('http://localhost:5000/api/v1/auth/users');
+      const res = await apiFetch('/api/v1/auth/users');
       if (!res.ok) throw new Error((await res.json()).error || 'Failed to load users');
       const data = await res.json();
       setUsers(data.users);
@@ -76,7 +76,7 @@ export function UserManagement({ apiFetch, currentUserEmail }: UserManagementPro
     }
     setSubmitting(true);
     try {
-      const res = await apiFetch('http://localhost:5000/api/v1/auth/register', {
+      const res = await apiFetch('/api/v1/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: name.trim(), email: email.trim().toLowerCase(), password, role }),
@@ -96,7 +96,7 @@ export function UserManagement({ apiFetch, currentUserEmail }: UserManagementPro
 
   const handleDelete = async (userId: string) => {
     try {
-      const res = await apiFetch(`http://localhost:5000/api/v1/auth/users/${userId}`, {
+      const res = await apiFetch(`/api/v1/auth/users/${userId}`, {
         method: 'DELETE',
       });
       if (!res.ok) {
