@@ -42,7 +42,7 @@ function useTheme() {
   const [isDark, setIsDark] = useState<boolean>(() => {
     const stored = localStorage.getItem('hireengine_theme');
     if (stored) return stored === 'dark';
-    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    return false; // Default to Light Mode
   });
 
   useEffect(() => {
@@ -692,10 +692,10 @@ function App() {
                   setActiveReqId(id);
                   addToast(`Active context switched to: ${requisitions.find(r => r.id === id)?.job_title}`, 'info');
                 }}
-                className="w-full text-xs bg-black/[0.04] border border-[var(--border-light)] rounded-[var(--radius-md)] px-2.5 py-2.5 text-[var(--text-primary)] focus:outline-none focus:border-[var(--primary)] transition-colors"
+                className="form-select w-full text-xs px-2.5 py-2.5"
               >
                 {requisitions.map(req => (
-                  <option key={req.id} value={req.id} className="bg-[var(--bg-surface)] text-[var(--text-primary)]">
+                  <option key={req.id} value={req.id}>
                     {req.job_title} ({req.target_domain})
                   </option>
                 ))}
@@ -737,39 +737,41 @@ function App() {
             <span className="user-name" title={authUser.name}>{authUser.name}</span>
             <span className="user-role">{authUser.role}</span>
           </div>
-          <button
-            onClick={toggleTheme}
-            title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-            className="flex-shrink-0 p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--primary)] hover:bg-[var(--primary)]/10 transition-colors cursor-pointer"
-            aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-          >
-            {isDark
-              ? <Sun className="h-4 w-4" />
-              : <Moon className="h-4 w-4" />}
-          </button>
-          <button
-            onClick={() => {
-              setPasswordError('');
-              setPasswordSuccess('');
-              setOldPassword('');
-              setNewPassword('');
-              setConfirmPassword('');
-              setShowPasswordModal(true);
-            }}
-            title="Change Password"
-            className="flex-shrink-0 p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--primary)] hover:bg-[var(--primary)]/10 transition-colors cursor-pointer"
-            aria-label="Change Password"
-          >
-            <Key className="h-4 w-4" />
-          </button>
-          <button
-            onClick={handleLogout}
-            title="Sign out"
-            className="flex-shrink-0 p-1.5 rounded-lg text-[var(--text-muted)] hover:text-rose-500 hover:bg-rose-50 transition-colors cursor-pointer"
-            aria-label="Sign out"
-          >
-            <LogOut className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-1 ml-3 flex-shrink-0">
+            <button
+              onClick={toggleTheme}
+              title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+              className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--primary)] hover:bg-[var(--primary)]/10 transition-colors cursor-pointer"
+              aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              {isDark
+                ? <Sun className="h-4 w-4" />
+                : <Moon className="h-4 w-4" />}
+            </button>
+            <button
+              onClick={() => {
+                setPasswordError('');
+                setPasswordSuccess('');
+                setOldPassword('');
+                setNewPassword('');
+                setConfirmPassword('');
+                setShowPasswordModal(true);
+              }}
+              title="Change Password"
+              className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--primary)] hover:bg-[var(--primary)]/10 transition-colors cursor-pointer"
+              aria-label="Change Password"
+            >
+              <Key className="h-4 w-4" />
+            </button>
+            <button
+              onClick={handleLogout}
+              title="Sign out"
+              className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-rose-500 hover:bg-rose-50 transition-colors cursor-pointer"
+              aria-label="Sign out"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -1060,24 +1062,24 @@ function App() {
                 {activeRequisition ? (
                   <div className="flex flex-col gap-6 text-xs">
                     <div>
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Title</span>
+                      <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider block">Title</span>
                       <div className="font-bold text-[var(--text-primary)] text-base mt-1">{activeRequisition.job_title}</div>
                     </div>
                     <div>
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Target Domain / Industry</span>
+                      <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider block">Target Domain / Industry</span>
                       <div className="text-xs bg-[var(--primary-glow)] border border-[var(--primary)]/20 px-3 py-1 rounded-full text-[var(--primary)] font-semibold inline-block mt-1">
                         {activeRequisition.target_domain}
                       </div>
                     </div>
                     <div>
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Work Location</span>
+                      <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider block">Work Location</span>
                       <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)] mt-1">
                         <MapPin className="h-3.5 w-3.5 text-[var(--primary)]" /> {activeRequisition.location}
                       </div>
                     </div>
                     <div>
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">JD Core Excerpts</span>
-                      <p className="text-sm text-[var(--text-secondary)] leading-relaxed italic bg-black/[0.03] p-4 rounded-xl border border-[var(--border-light)] mt-1.5">
+                      <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider block">JD Core Excerpts</span>
+                      <p className="text-sm text-[var(--text-secondary)] leading-relaxed italic bg-[var(--bg-surface-hover)] p-4 rounded-xl border border-[var(--border-light)] mt-1.5">
                         "{activeRequisition.job_description_text}"
                       </p>
                     </div>
@@ -1211,13 +1213,13 @@ function App() {
                           <div className="flex flex-col gap-2.5 min-w-0">
                             <div className="flex items-center gap-3 flex-wrap">
                               <h4 className="font-bold text-base text-[var(--text-primary)]">{req.job_title}</h4>
-                              <span className="text-xs bg-black/5 border border-black/10 px-3 py-0.5 rounded-full text-[var(--text-secondary)] font-medium">
+                              <span className="text-xs bg-[var(--bg-surface-hover)] border border-[var(--border-light)] px-3 py-0.5 rounded-full text-[var(--text-secondary)] font-medium">
                                 {req.target_domain}
                               </span>
                             </div>
                             <div className="flex items-center gap-4 text-xs text-[var(--text-secondary)]">
                               <span className="flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-[var(--primary)]" /> {req.location}</span>
-                              <span className="text-slate-400">•</span>
+                              <span className="text-[var(--text-muted)]">•</span>
                               <span>Added {new Date(req.created_at).toLocaleDateString()}</span>
                             </div>
                             <p className="text-sm text-[var(--text-secondary)] leading-relaxed max-w-[520px] mt-0.5 line-clamp-2">
@@ -1238,7 +1240,7 @@ function App() {
                               className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
                                 activeReqId === req.id
                                   ? 'bg-emerald-500/10 text-emerald-700 border border-emerald-500/30 cursor-default'
-                                  : 'bg-black/5 text-[var(--text-primary)] border border-black/10 hover:border-black/20 hover:bg-black/10'
+                                  : 'btn btn-secondary text-xs'
                               }`}
                             >
                               {activeReqId === req.id ? '✓ Active' : 'Set Active'}
@@ -1282,22 +1284,22 @@ function App() {
 
       {/* Change Password Modal */}
       {showPasswordModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-fade-in">
-          <div className="bg-white rounded-[var(--radius-lg)] shadow-xl border border-slate-200 w-full max-w-md overflow-hidden">
-            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fade-in">
+          <div className="bg-[var(--bg-surface)] rounded-[var(--radius-lg)] shadow-xl border border-[var(--border-light)] w-full max-w-md overflow-hidden">
+            <div className="p-5 border-b border-[var(--border-light)] flex items-center justify-between bg-[var(--bg-surface-hover)]">
               <div className="flex items-center gap-2">
-                <div className="p-2 rounded-lg bg-[var(--primary)]/10 text-[var(--primary)]">
+                <div className="p-2 rounded-lg bg-[var(--primary-glow)] text-[var(--primary)] border border-[var(--primary)]/20">
                   <Key className="h-5 w-5" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-base text-slate-800">Change Password</h3>
-                  <p className="text-xs text-slate-500">Update security credentials for your account</p>
+                  <h3 className="font-bold text-base text-[var(--text-primary)]">Change Password</h3>
+                  <p className="text-xs text-[var(--text-muted)]">Update security credentials for your account</p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setShowPasswordModal(false)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
+                className="text-[var(--text-muted)] hover:text-[var(--text-primary)] p-1 rounded-lg hover:bg-[var(--bg-surface)] transition-colors cursor-pointer"
               >
                 <XIcon className="h-5 w-5" />
               </button>
@@ -1305,37 +1307,37 @@ function App() {
 
             <form onSubmit={handleChangePassword} className="p-5 flex flex-col gap-4">
               {passwordError && (
-                <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg flex items-center gap-2 text-xs font-semibold text-rose-600">
+                <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-lg flex items-center gap-2 text-xs font-semibold text-rose-600">
                   <AlertCircle className="h-4 w-4 flex-shrink-0" />
                   <span>{passwordError}</span>
                 </div>
               )}
               {passwordSuccess && (
-                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center gap-2 text-xs font-semibold text-emerald-600">
+                <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg flex items-center gap-2 text-xs font-semibold text-emerald-600">
                   <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
                   <span>{passwordSuccess}</span>
                 </div>
               )}
 
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-bold text-slate-600 uppercase">Current Password</label>
+                <label className="text-xs font-bold text-[var(--text-muted)] uppercase">Current Password</label>
                 <div className="relative">
-                  <Lock className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                  <Lock className="absolute left-3 top-2.5 h-4 w-4 text-[var(--text-muted)]" />
                   <input
                     type="password"
                     required
                     value={oldPassword}
                     onChange={e => setOldPassword(e.target.value)}
                     placeholder="Enter current password"
-                    className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:border-[var(--primary)]"
+                    className="form-input text-sm pl-9"
                   />
                 </div>
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-bold text-slate-600 uppercase">New Password</label>
+                <label className="text-xs font-bold text-[var(--text-muted)] uppercase">New Password</label>
                 <div className="relative">
-                  <Lock className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                  <Lock className="absolute left-3 top-2.5 h-4 w-4 text-[var(--text-muted)]" />
                   <input
                     type="password"
                     required
@@ -1343,15 +1345,15 @@ function App() {
                     value={newPassword}
                     onChange={e => setNewPassword(e.target.value)}
                     placeholder="At least 6 characters"
-                    className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:border-[var(--primary)]"
+                    className="form-input text-sm pl-9"
                   />
                 </div>
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-bold text-slate-600 uppercase">Confirm New Password</label>
+                <label className="text-xs font-bold text-[var(--text-muted)] uppercase">Confirm New Password</label>
                 <div className="relative">
-                  <Lock className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                  <Lock className="absolute left-3 top-2.5 h-4 w-4 text-[var(--text-muted)]" />
                   <input
                     type="password"
                     required
@@ -1359,16 +1361,16 @@ function App() {
                     value={confirmPassword}
                     onChange={e => setConfirmPassword(e.target.value)}
                     placeholder="Confirm new password"
-                    className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:border-[var(--primary)]"
+                    className="form-input text-sm pl-9"
                   />
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 mt-2">
+              <div className="flex justify-end gap-2 pt-2 border-t border-[var(--border-light)] mt-2">
                 <button
                   type="button"
                   onClick={() => setShowPasswordModal(false)}
-                  className="px-4 py-2 rounded-lg text-xs font-semibold border border-slate-300 text-slate-600 hover:bg-slate-50 cursor-pointer"
+                  className="btn btn-secondary text-xs px-4 py-2"
                 >
                   Cancel
                 </button>

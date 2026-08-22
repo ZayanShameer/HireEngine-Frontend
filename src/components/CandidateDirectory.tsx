@@ -358,12 +358,12 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
 
   const getStageColorClass = (stage: HiringStage) => {
     switch (stage) {
-      case 'Screening': return 'bg-slate-100 text-slate-700 border border-slate-200';
-      case 'Shortlist': return 'bg-emerald-50 text-emerald-700 border border-emerald-200';
-      case 'Interviewing': return 'bg-sky-50 text-sky-700 border border-sky-200';
-      case 'Offered': return 'bg-[var(--primary-glow)] text-[var(--primary)] border border-[var(--primary)]/20';
-      case 'Hired': return 'bg-teal-50 text-teal-700 border border-teal-200';
-      case 'Rejected': return 'bg-rose-50 text-rose-700 border border-rose-200';
+      case 'Screening': return 'bg-slate-100 text-slate-800 border border-slate-300';
+      case 'Shortlist': return 'bg-emerald-100 text-emerald-800 border border-emerald-300';
+      case 'Interviewing': return 'bg-sky-100 text-sky-800 border border-sky-300';
+      case 'Offered': return 'bg-amber-100 text-amber-800 border border-amber-300';
+      case 'Hired': return 'bg-teal-100 text-teal-800 border border-teal-300';
+      case 'Rejected': return 'bg-rose-100 text-rose-800 border border-rose-300';
     }
   };
 
@@ -420,13 +420,13 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
             </button>
             <button
               onClick={toggleSelectAll}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-[var(--radius-md)] text-xs font-semibold bg-white border border-[var(--border-light)] text-[var(--text-secondary)] hover:text-[var(--primary)] hover:border-[var(--primary)]/30 transition-all cursor-pointer shadow-2xs ml-2"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-[var(--radius-md)] text-xs font-semibold bg-[var(--bg-surface)] border border-[var(--border-light)] text-[var(--text-secondary)] hover:text-[var(--primary)] hover:border-[var(--primary)]/30 transition-all cursor-pointer shadow-2xs ml-2"
               title="Select or deselect all visible candidates"
             >
               {selectedIds.length === filteredCandidates.length && filteredCandidates.length > 0 ? (
                 <CheckSquare className="h-4 w-4 text-[var(--primary)]" />
               ) : (
-                <Square className="h-4 w-4 text-slate-400" />
+                <Square className="h-4 w-4 text-[var(--text-muted)]" />
               )}
               {selectedIds.length === filteredCandidates.length && filteredCandidates.length > 0 ? 'Deselect All' : 'Select All'}
             </button>
@@ -472,7 +472,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                 <button
                   key={stage}
                   onClick={() => handleBulkStageMove(stage)}
-                  className="text-xs font-bold px-2.5 py-1 rounded bg-white hover:bg-[var(--primary)] text-slate-700 hover:text-white border border-slate-200 hover:border-[var(--primary)] transition-all cursor-pointer shadow-2xs"
+                  className="text-xs font-bold px-2.5 py-1 rounded bg-[var(--bg-surface)] hover:bg-[var(--primary)] text-[var(--text-primary)] hover:text-white border border-[var(--border-light)] hover:border-[var(--primary)] transition-all cursor-pointer shadow-2xs"
                 >
                   {stage}
                 </button>
@@ -484,7 +484,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                   e.preventDefault();
                   setSelectedIds([]);
                 }}
-                className="text-xs font-semibold text-slate-400 hover:text-rose-500 ml-2 px-2 py-1 cursor-pointer"
+                className="text-xs font-semibold text-[var(--text-muted)] hover:text-rose-500 ml-2 px-2 py-1 cursor-pointer"
               >
                 Clear Selection
               </button>
@@ -519,7 +519,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                 onClick={() => switchMode('quick')}
                 className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-[var(--radius-sm)] text-xs font-bold transition-all cursor-pointer ${
                   searchMode === 'quick'
-                    ? 'bg-white shadow text-[var(--text-primary)] border border-[var(--border-light)]'
+                    ? 'bg-[var(--bg-surface)] shadow text-[var(--text-primary)] border border-[var(--border-light)]'
                     : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
                 }`}
               >
@@ -920,15 +920,13 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
               </button>
             </div>
 
-            {/* Scrollable Content */}
             <div className="p-6 flex-1 overflow-y-auto flex flex-col gap-6">
-
               {selectedCandidate.eligible === false && (
                 <div className="bg-rose-500/10 border border-rose-500/30 rounded-[var(--radius-lg)] p-4.5 flex items-start gap-3.5 text-rose-300 animate-fade-in">
                   <AlertCircle className="h-5.5 w-5.5 text-rose-500 flex-shrink-0 mt-0.5" />
                   <div className="flex flex-col gap-1.5 min-w-0">
                     <span className="text-xs font-black text-rose-400 uppercase tracking-wider">HARD VETO FAILURE: Candidate Ineligible</span>
-                    <p className="text-xs leading-relaxed text-slate-400 font-medium">
+                    <p className="text-xs leading-relaxed text-[var(--text-muted)] font-medium">
                       This candidate does not satisfy one or more mandatory requirements:
                     </p>
                     <div className="text-sm font-bold text-rose-300 bg-rose-500/15 border border-rose-500/25 px-3 py-2 rounded-md font-mono mt-1 leading-normal">
@@ -1022,7 +1020,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
               {/* Score Indicator */}
               <div className="bg-black/[0.015] border border-[var(--border-light)] rounded-[var(--radius-lg)] p-6 flex items-center justify-between gap-4">
                 <div className="flex flex-col gap-1.5">
-                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Evaluation Score</span>
+                  <span className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">Evaluation Score</span>
                   <span className="text-4xl font-black text-[var(--text-primary)]">{selectedCandidate.match_score}%</span>
                   <span className="text-xs text-[var(--text-muted)]">Fitted for target domain</span>
                 </div>
@@ -1050,7 +1048,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
 
               {/* Contact Tokens */}
               <div className="flex flex-col gap-3">
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                <h4 className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider flex items-center gap-2">
                   <User className="h-4 w-4 text-[var(--primary)]" /> Contact Tokens
                 </h4>
                 <div className="grid grid-cols-1 gap-3 bg-black/[0.01] border border-[var(--border-light)] p-4 rounded-[var(--radius-md)] text-sm">
@@ -1071,10 +1069,10 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
                 </div>
               </div>
 
-              {/* Download CV â€” only shown when a file was uploaded to backend */}
+              {/* Download CV — only shown when a file was uploaded to backend */}
               {selectedCandidate.cv_file_name && (
                 <div className="flex flex-col gap-3">
-                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                  <h4 className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider flex items-center gap-2">
                     <Download className="h-4 w-4 text-[var(--primary)]" /> Original CV File
                   </h4>
                   {cvExists === false ? (

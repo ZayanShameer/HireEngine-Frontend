@@ -697,18 +697,23 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
   };
 
   const extractTextFromPDF = async (arrayBuffer: ArrayBuffer, onPageExtract: (pct: number) => void): Promise<string> => {
-    const pdfjsLib = (window as any)['pdfjs-dist/build/pdf'];
-    if (!pdfjsLib) throw new Error('PDF.js library not loaded. Please check internet connection.');
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-    let fullText = '';
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const textContent = await page.getTextContent();
-      fullText += textContent.items.map((item: any) => item.str).join(' ') + '\n';
-      onPageExtract(i / pdf.numPages);
+    try {
+      const pdfjsLib = (window as any)['pdfjs-dist/build/pdf'];
+      if (!pdfjsLib) throw new Error('PDF.js library not loaded. Please check internet connection.');
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      let fullText = '';
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        fullText += textContent.items.map((item: any) => item.str).join(' ') + '\n';
+        onPageExtract(i / pdf.numPages);
+      }
+      return fullText;
+    } catch (e: any) {
+      console.warn('Client-side PDF text extraction notice:', e);
+      return '';
     }
-    return fullText;
   };
 
   const extractEmailRegex = (text: string): string => {
@@ -997,7 +1002,7 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
                 value={driveUrl}
                 onChange={e => setDriveUrl(e.target.value)}
                 disabled={!activeRequisition || driveImporting}
-                className="form-input text-xs flex-grow py-2.5 px-3 bg-white border border-[var(--border-light)] rounded-[var(--radius-sm)] focus:border-[var(--primary)] focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
+                className="form-input text-xs flex-grow py-2.5 px-3 rounded-[var(--radius-sm)] disabled:opacity-60 disabled:cursor-not-allowed"
                 required
               />
               <button
@@ -1088,7 +1093,7 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
             <div className="mt-6">
               {/* Toolbar */}
               <div className="flex items-center justify-between mb-3">
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                <h4 className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">
                   Ingestion Queue ({queue.filter(i => i.status === 'completed').length}/{queue.length} done)
                 </h4>
                 {completedItems.length > 0 && (

@@ -4,49 +4,49 @@
   --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
 
-  /* Colors */
-  --bg-main: #f8f9fa; /* Warm premium off-white */
-  --bg-surface: rgba(255, 255, 255, 0.95); /* Clean white card surfaces */
-  --bg-surface-hover: #f1f3f5;
-  --bg-sidebar: #ffffff; /* Crisp white sidebar */
+  /* Colors - Soft Light Mode (High Contrast & Legible) */
+  --bg-main: #f8fafc; /* Slate 50 background */
+  --bg-surface: #ffffff; /* Solid white card surfaces */
+  --bg-surface-hover: #f1f5f9; /* Slate 100 hover state */
+  --bg-sidebar: #ffffff; /* Solid white sidebar */
   
-  --border-light: #e2dfda; /* Refined warm slate-gray */
-  --border-focus: #8c6f56; /* Rich sand-bronze */
+  --border-light: #e2e8f0; /* Slate 200 light border */
+  --border-focus: #94a3b8; /* Slate 400 focus border */
   
-  --text-primary: #1a1613; /* Rich dark warm charcoal */
-  --text-secondary: #4d443e; /* Muted warm charcoal-slate */
-  --text-muted: #8a7b70; /* Muted sand-gray */
+  --text-primary: #0f172a; /* Slate 900 for high-contrast primary text */
+  --text-secondary: #334155; /* Slate 700 secondary text */
+  --text-muted: #64748b; /* Slate 500 muted text */
 
-  /* Accent Colors */
-  --primary: #8c6f56; /* Rich sand-bronze for high contrast */
+  /* Accent Colors - Premium Sand-Bronze */
+  --primary: #8c6f56; 
   --primary-gradient: linear-gradient(135deg, #a88a72 0%, #634b38 100%);
   --primary-glow: rgba(140, 111, 86, 0.08);
   --primary-light: #f5ede4;
   
-  --success: #2e7d32; /* Legible green on white background */
-  --success-glow: rgba(46, 125, 50, 0.08);
+  --success: #15803d; /* Emerald 700 for text contrast */
+  --success-glow: rgba(21, 128, 61, 0.08);
   
-  --warning: #b25e00; /* Legible amber/gold on white background */
-  --warning-glow: rgba(178, 94, 0, 0.08);
+  --warning: #b45309; /* Amber 700 for text contrast */
+  --warning-glow: rgba(180, 83, 9, 0.08);
   
-  --danger: #c62828; /* Legible red on white background */
-  --danger-glow: rgba(198, 40, 40, 0.08);
+  --danger: #b91c1c; /* Red 700 for text contrast */
+  --danger-glow: rgba(185, 28, 28, 0.08);
   
-  --info: #1565c0; /* Legible steel blue on white background */
-  --info-glow: rgba(21, 101, 192, 0.08);
+  --info: #0369a1; /* Sky 700 for text contrast */
+  --info-glow: rgba(3, 105, 161, 0.08);
   
   /* Layout */
   --sidebar-width: 270px;
   --header-height: 70px;
-  --radius-sm: 6px;
+  --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 18px;
   
   /* Shadows */
-  --shadow-sm: 0 2px 8px -2px rgba(28, 25, 23, 0.06);
-  --shadow-md: 0 10px 25px -5px rgba(28, 25, 23, 0.06);
-  --shadow-lg: 0 20px 40px -10px rgba(28, 25, 23, 0.1);
-  --shadow-glow: 0 0 25px 0 rgba(140, 111, 86, 0.12);
+  --shadow-sm: 0 1px 3px 0 rgba(15, 23, 42, 0.05), 0 1px 2px -1px rgba(15, 23, 42, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.05), 0 2px 4px -2px rgba(15, 23, 42, 0.05);
+  --shadow-lg: 0 10px 15px -3px rgba(15, 23, 42, 0.06), 0 4px 6px -4px rgba(15, 23, 42, 0.06);
+  --shadow-glow: 0 0 25px 0 rgba(140, 111, 86, 0.08);
   
   /* Transitions */
   --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
@@ -54,37 +54,35 @@
 }
 
 /* ── DARK MODE TOKENS ──────────────────────────────────────────── */
-/* Applied when the <html> element has class="dark"                 */
 .dark {
-  --bg-main:           #0f0e0d;
-  --bg-surface:        rgba(26, 22, 19, 0.95);
-  --bg-surface-hover:  #2a231e;
-  --bg-sidebar:        #161210;
+  --bg-main:           #0b0f19; /* Soft Slate-Navy background */
+  --bg-surface:        #1e293b; /* Slate 800 cards */
+  --bg-surface-hover:  #334155; /* Slate 700 hover state */
+  --bg-sidebar:        #0f172a; /* Slate 900 sidebar */
 
-  --border-light:      #2e2620;
-  --border-focus:      #a88a72;
+  --border-light:      #334155; /* Slate 700 border */
+  --border-focus:      #64748b; /* Slate 500 border */
 
-  --text-primary:      #f0ebe6;
-  --text-secondary:    #c4b5a8;
-  --text-muted:        #7a6b60;
+  --text-primary:      #f8fafc; /* Slate 50 text */
+  --text-secondary:    #cbd5e1; /* Slate 300 text */
+  --text-muted:        #94a3b8; /* Slate 400 text */
 
-  /* Accent stays on-brand but pumped up for dark bg contrast */
   --primary:           #c4956a;
   --primary-gradient:  linear-gradient(135deg, #d4a87a 0%, #8c6844 100%);
-  --primary-glow:      rgba(196, 149, 106, 0.12);
+  --primary-glow:      rgba(196, 149, 106, 0.15);
   --primary-light:     #3a2c22;
 
   --success:           #4ade80;
-  --success-glow:      rgba(74, 222, 128, 0.10);
+  --success-glow:      rgba(74, 222, 128, 0.12);
 
   --warning:           #fbbf24;
-  --warning-glow:      rgba(251, 191, 36, 0.10);
+  --warning-glow:      rgba(251, 191, 36, 0.12);
 
   --danger:            #f87171;
-  --danger-glow:       rgba(248, 113, 113, 0.10);
+  --danger-glow:       rgba(248, 113, 113, 0.12);
 
-  --info:              #60a5fa;
-  --info-glow:         rgba(96, 165, 250, 0.10);
+  --info:              #38bdf8;
+  --info-glow:         rgba(56, 189, 248, 0.12);
 
   --shadow-sm:         0 2px 8px -2px rgba(0, 0, 0, 0.4);
   --shadow-md:         0 10px 25px -5px rgba(0, 0, 0, 0.5);
@@ -107,6 +105,58 @@ body {
   height: 100vh;
   width: 100vw;
   transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+/* ── Global Form Element Contrast ──────────────────────────────── */
+/* Ensure all native form controls inherit readable colors         */
+select,
+input,
+textarea,
+button {
+  color: inherit;
+  font-family: inherit;
+}
+
+/* Native <select> dropdown panel — explicit high-contrast colors  */
+select {
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
+  color-scheme: light;
+}
+
+.dark select {
+  color-scheme: dark;
+}
+
+/* Native <option> elements ignore CSS variables in most browsers, */
+/* so we set explicit hex colors for guaranteed readability.       */
+option {
+  background-color: #ffffff;
+  color: #0f172a;
+}
+
+.dark option {
+  background-color: #1e293b;
+  color: #f8fafc;
+}
+
+/* Ensure all text inputs and textareas have legible text color    */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="number"],
+input[type="search"],
+input[type="url"],
+input[type="tel"],
+textarea {
+  color: var(--text-primary);
+  background-color: var(--bg-surface);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-muted);
+  opacity: 0.7;
 }
 
 /* Custom Scrollbars */
@@ -369,9 +419,9 @@ body {
 }
 
 .btn-secondary {
-  background: rgba(0, 0, 0, 0.02);
+  background: #ffffff;
   color: var(--text-primary);
-  border-color: var(--border-light);
+  border-color: #cbd5e1; /* Slate 300 */
 }
 .dark .btn-secondary {
   background: rgba(255, 255, 255, 0.04);
@@ -379,8 +429,8 @@ body {
 }
 
 .btn-secondary:hover {
-  background: rgba(0, 0, 0, 0.05);
-  border-color: rgba(0, 0, 0, 0.1);
+  background: var(--bg-surface-hover);
+  border-color: #94a3b8; /* Slate 400 */
 }
 .dark .btn-secondary:hover {
   background: rgba(255, 255, 255, 0.08);
@@ -583,7 +633,7 @@ body {
 
 .form-select, .form-input, .form-textarea {
   width: 100%;
-  background: rgba(0, 0, 0, 0.01);
+  background: var(--bg-surface);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
   padding: 13px 18px;
@@ -591,6 +641,7 @@ body {
   font-family: var(--font-sans);
   font-size: 0.88rem;
   transition: var(--transition-fast);
+  color-scheme: light;
 }
 .dark .form-select, .dark .form-input, .dark .form-textarea {
   background: rgba(255, 255, 255, 0.03);
@@ -601,11 +652,21 @@ body {
   outline: none;
   border-color: var(--primary);
   box-shadow: 0 0 0 2px rgba(140, 111, 86, 0.1);
-  background: rgba(0, 0, 0, 0.02);
+  background: var(--bg-surface);
 }
 .dark .form-select:focus, .dark .form-input:focus, .dark .form-textarea:focus {
   background: rgba(255, 255, 255, 0.05);
   box-shadow: 0 0 0 2px rgba(196, 149, 106, 0.15);
+}
+
+/* Ensure <option> inside .form-select also gets explicit contrast */
+.form-select option {
+  background-color: #ffffff;
+  color: #0f172a;
+}
+.dark .form-select option {
+  background-color: #1e293b;
+  color: #f8fafc;
 }
 
 .weight-slider {
@@ -978,7 +1039,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #0d0c0b;
+  background: var(--bg-main);
   position: fixed;
   top: 0;
   left: 0;
@@ -986,6 +1047,7 @@ body {
   font-family: var(--font-sans);
   padding: 24px;
   box-sizing: border-box;
+  transition: background-color 0.25s ease;
 }
 
 .login-bg {
@@ -998,8 +1060,13 @@ body {
   position: absolute;
   border-radius: 50%;
   filter: blur(80px);
-  opacity: 0.35;
+  opacity: 0.12;
   animation: loginOrbFloat 8s ease-in-out infinite;
+  transition: opacity 0.25s ease;
+}
+
+.dark .login-orb {
+  opacity: 0.35;
 }
 
 .login-orb-1 {
@@ -1021,6 +1088,10 @@ body {
   background: radial-gradient(circle, #c4a882 0%, transparent 70%);
   top: 10%; right: 5%;
   animation-delay: -6s;
+  opacity: 0.08;
+}
+
+.dark .login-orb-3 {
   opacity: 0.12;
 }
 
@@ -1030,11 +1101,16 @@ body {
   border-radius: 50%;
   pointer-events: none;
   width: 900px; height: 900px;
-  background: radial-gradient(circle at center, rgba(168, 138, 114, 0.18) 0%, rgba(99, 75, 56, 0.10) 40%, transparent 70%);
+  background: radial-gradient(circle at center, rgba(168, 138, 114, 0.10) 0%, rgba(99, 75, 56, 0.05) 40%, transparent 70%);
   top: 50%; left: 50%;
   transform: translate(-50%, -50%);
   animation: loginOrbFloat 12s ease-in-out infinite;
   animation-delay: -4s;
+  transition: opacity 0.25s ease;
+}
+
+.dark .login-orb-4 {
+  background: radial-gradient(circle at center, rgba(168, 138, 114, 0.18) 0%, rgba(99, 75, 56, 0.10) 40%, transparent 70%);
 }
 
 @keyframes loginOrbFloat {
@@ -1046,12 +1122,18 @@ body {
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+    linear-gradient(rgba(15, 23, 42, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 23, 42, 0.02) 1px, transparent 1px);
   background-size: 56px 56px;
-  /* Fade grid out near edges so wide screens look polished */
   -webkit-mask-image: radial-gradient(ellipse 80% 90% at center, black 30%, transparent 100%);
   mask-image: radial-gradient(ellipse 80% 90% at center, black 30%, transparent 100%);
+  transition: background-image 0.25s ease;
+}
+
+.dark .login-grid {
+  background-image:
+    linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
 }
 
 .login-card-wrapper {
@@ -1063,7 +1145,6 @@ body {
   gap: 32px;
   width: 100%;
   max-width: 460px;
-  /* Ensure the card itself is truly centred in the full viewport */
   margin: auto;
 }
 
@@ -1081,39 +1162,47 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 8px 24px rgba(140, 111, 86, 0.4);
+  box-shadow: 0 8px 24px rgba(140, 111, 86, 0.3);
   flex-shrink: 0;
 }
 
 .login-brand-name {
   font-size: 1.5rem;
   font-weight: 800;
-  color: #ffffff;
+  color: var(--text-primary);
   letter-spacing: -0.02em;
   margin: 0;
 }
 
 .login-brand-tagline {
   font-size: 0.75rem;
-  color: rgba(255,255,255,0.45);
+  color: var(--text-secondary);
   margin: 0;
   font-weight: 500;
   letter-spacing: 0.01em;
+  opacity: 0.8;
 }
 
 .login-card {
   width: 100%;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-light);
   border-radius: 24px;
   padding: 40px;
   backdrop-filter: blur(40px);
   -webkit-backdrop-filter: blur(40px);
+  box-shadow: var(--shadow-lg);
+  animation: loginCardIn 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: background-color 0.25s ease, border-color 0.25s ease;
+}
+
+.dark .login-card {
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   box-shadow:
     0 32px 64px rgba(0, 0, 0, 0.5),
-    0 0 0 1px rgba(255,255,255,0.06) inset,
-    0 1px 0 rgba(255,255,255,0.12) inset;
-  animation: loginCardIn 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+    0 0 0 1px rgba(255,255,255,0.02) inset,
+    0 1px 0 rgba(255,255,255,0.05) inset;
 }
 
 @keyframes loginCardIn {
@@ -1132,8 +1221,8 @@ body {
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  background: rgba(140, 111, 86, 0.15);
-  border: 1px solid rgba(140, 111, 86, 0.3);
+  background: var(--primary-glow);
+  border: 1px solid rgba(140, 111, 86, 0.2);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1143,14 +1232,14 @@ body {
 .login-title {
   font-size: 1.25rem;
   font-weight: 800;
-  color: #ffffff;
+  color: var(--text-primary);
   margin: 0 0 4px;
   letter-spacing: -0.01em;
 }
 
 .login-subtitle {
   font-size: 0.8125rem;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--text-secondary);
   margin: 0;
 }
 
@@ -1158,12 +1247,12 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: rgba(239, 68, 68, 0.12);
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: var(--danger-glow);
+  border: 1px solid rgba(185, 28, 28, 0.3);
   border-radius: 10px;
   padding: 12px 14px;
   font-size: 0.8125rem;
-  color: #fca5a5;
+  color: var(--danger);
   margin-bottom: 20px;
   animation: loginShake 0.4s ease;
 }
@@ -1191,7 +1280,7 @@ body {
 .login-label {
   font-size: 0.75rem;
   font-weight: 700;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -1200,29 +1289,38 @@ body {
   position: relative;
   display: flex;
   align-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--border-light);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(15, 23, 42, 0.02);
   transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.dark .login-input-wrapper {
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .login-input-wrapper:focus-within {
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(140, 111, 86, 0.2);
-  background: rgba(255, 255, 255, 0.07);
+  box-shadow: 0 0 0 3px rgba(140, 111, 86, 0.15);
+  background: var(--bg-surface);
+}
+
+.dark .login-input-wrapper:focus-within {
+  background: rgba(15, 23, 42, 0.2);
 }
 
 .login-input-wrapper.error {
-  border-color: rgba(239, 68, 68, 0.6);
-  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12);
+  border-color: rgba(185, 28, 28, 0.5);
+  box-shadow: 0 0 0 3px rgba(185, 28, 28, 0.12);
 }
 
 .login-input-icon {
   position: absolute;
   left: 14px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-muted);
   pointer-events: none;
   flex-shrink: 0;
+  opacity: 0.7;
 }
 
 .login-input {
@@ -1231,14 +1329,15 @@ body {
   border: none;
   outline: none;
   font-size: 0.9375rem;
-  color: #ffffff;
+  color: var(--text-primary);
   padding: 14px 14px 14px 42px;
   font-family: var(--font-sans);
   caret-color: var(--primary);
 }
 
 .login-input::placeholder {
-  color: rgba(255, 255, 255, 0.25);
+  color: var(--text-muted);
+  opacity: 0.6;
 }
 
 .login-input:disabled {
@@ -1251,7 +1350,7 @@ body {
   right: 12px;
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-muted);
   cursor: pointer;
   padding: 4px;
   display: flex;
@@ -1259,15 +1358,17 @@ body {
   justify-content: center;
   border-radius: 6px;
   transition: color 0.15s;
+  opacity: 0.7;
 }
 
 .login-eye-toggle:hover {
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--text-primary);
+  opacity: 1;
 }
 
 .login-field-error {
   font-size: 0.75rem;
-  color: #fca5a5;
+  color: var(--danger);
   margin: 0;
 }
 
@@ -1287,7 +1388,7 @@ body {
   letter-spacing: 0.01em;
   cursor: pointer;
   transition: opacity 0.2s, transform 0.15s, box-shadow 0.2s;
-  box-shadow: 0 8px 24px rgba(140, 111, 86, 0.35);
+  box-shadow: 0 8px 24px rgba(140, 111, 86, 0.25);
   margin-top: 4px;
   font-family: var(--font-sans);
 }
@@ -1295,12 +1396,12 @@ body {
 .login-submit-btn:hover:not(:disabled) {
   opacity: 0.92;
   transform: translateY(-1px);
-  box-shadow: 0 12px 32px rgba(140, 111, 86, 0.45);
+  box-shadow: 0 12px 32px rgba(140, 111, 86, 0.35);
 }
 
 .login-submit-btn:active:not(:disabled) {
   transform: translateY(0);
-  box-shadow: 0 4px 12px rgba(140, 111, 86, 0.3);
+  box-shadow: 0 4px 12px rgba(140, 111, 86, 0.2);
 }
 
 .login-submit-btn:disabled {
@@ -1311,16 +1412,18 @@ body {
 .login-footer-note {
   margin: 24px 0 0;
   font-size: 0.71875rem;
-  color: rgba(255, 255, 255, 0.25);
+  color: var(--text-muted);
   text-align: center;
   line-height: 1.5;
+  opacity: 0.8;
 }
 
 .login-copyright {
   font-size: 0.6875rem;
-  color: rgba(255, 255, 255, 0.2);
+  color: var(--text-muted);
   margin: 0;
   text-align: center;
+  opacity: 0.6;
 }
 
 /* ── Mobile & Tablet Responsive Layout ──────────────────────────────────── */
