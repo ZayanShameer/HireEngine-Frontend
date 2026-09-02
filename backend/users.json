@@ -6,5 +6,13 @@
     "name": "System Administrator",
     "role": "Admin",
     "tenant_id": "admin-tenant"
+  },
+  {
+    "id": "732c34dd-56be-481f-bb0e-88713caa0243",
+    "email": "recruiteracc1@hirengine.com",
+    "password_hash": "dcb1a36f81dea77e524ff99d4acadf1f077c8eae00c46cf6be0e4c0d01a32516",
+    "name": "Tester 1",
+    "role": "Viewer",
+    "tenant_id": "c0824157-198e-445c-8927-d5b3bc8a7bfe"
   }
 ]
