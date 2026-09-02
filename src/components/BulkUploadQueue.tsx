@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { Upload, FileText, CheckCircle, AlertCircle, RefreshCw, Layers, Plus, ChevronDown, ChevronUp, User, ChevronRight, LayoutList, LayoutGrid, X, CloudDownload, FolderOpen, FileSpreadsheet } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { QueueItem, Requisition, Candidate, TargetDomain } from '../types';
+import { API_BASE_URL } from '../lib/apiFetch';
 
 interface BulkUploadQueueProps {
   activeRequisition: Requisition | null;
@@ -600,7 +601,7 @@ export const BulkUploadQueue: React.FC<BulkUploadQueueProps> = ({
     setDriveError(null);
 
     try {
-      const response = await fetch('/api/v1/gdrive-import', {
+      const response = await fetch(`${API_BASE_URL}/api/v1/gdrive-import`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

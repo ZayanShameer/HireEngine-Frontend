@@ -9,6 +9,8 @@
  *  - Injects Authorization: Bearer <token> header
  *  - Calls onUnauthorized() on any 401 response (triggers logout)
  */
+export const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+
 export function createApiFetch(token: string, onUnauthorized: () => void) {
   return async function apiFetch(
     url: string,
@@ -17,7 +19,8 @@ export function createApiFetch(token: string, onUnauthorized: () => void) {
     const headers = new Headers(options.headers ?? {});
     headers.set('Authorization', `Bearer ${token}`);
 
-    const res = await fetch(url, { ...options, headers });
+    const fullUrl = `${API_BASE_URL}${url}`;
+    const res = await fetch(fullUrl, { ...options, headers });
 
     if (res.status === 401) {
       onUnauthorized();

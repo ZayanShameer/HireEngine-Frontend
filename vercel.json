@@ -2,7 +2,7 @@
     "rewrites": [
         {
             "source": "/api/:path*",
-            "destination": "https://hireengine-api.onrender.com/api/:path*"
+            "destination": "https://hireengine.onrender.com/api/:path*"
         }
     ]
 }

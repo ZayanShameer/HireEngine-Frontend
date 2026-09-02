@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Eye, EyeOff, Loader2, Lock, User, Zap, Shield, AlertCircle } from 'lucide-react';
+import { API_BASE_URL } from '../lib/apiFetch';
 
 interface LoginPageProps {
   onLogin: (token: string, user: { name: string; role: string; email: string }) => void;
@@ -30,7 +31,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
 
     setIsLoading(true);
     try {
-      const res = await fetch('/api/v1/auth/login', {
+      const res = await fetch(`${API_BASE_URL}/api/v1/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
