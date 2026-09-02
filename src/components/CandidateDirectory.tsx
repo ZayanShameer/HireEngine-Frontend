@@ -390,7 +390,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
 
   return (
     <div 
-      className="flex flex-col h-full overflow-hidden"
+      className="flex flex-col"
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => e.preventDefault()}
     >
@@ -494,7 +494,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
       </div>
 
       {/* Main Split-Panel Layout */}
-      <div className="flex flex-col xl:flex-row flex-1 gap-8 overflow-hidden min-h-0">
+      <div className="flex flex-col xl:flex-row gap-8 items-start">
         
         {/* Left Sidebar: Faceted Navigation */}
         <div className="faceted-sidebar">
@@ -672,7 +672,7 @@ export const CandidateDirectory: React.FC<CandidateDirectoryProps> = ({
         </div>
 
         {/* Right Main Panel: Directory Visualization */}
-        <div className={viewMode === 'kanban' ? 'flex-1 min-h-0 overflow-hidden pt-1' : 'flex-1 overflow-y-auto min-h-0 pr-1 pt-3 pb-6 pl-1'}>
+        <div className={viewMode === 'kanban' ? 'flex-1 min-h-0 overflow-hidden pt-1' : 'flex-1 pr-1 pt-3 pb-6 pl-1'}>
           {viewMode === 'list' ? (
             /* LIST VIEW GRID */
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '24px' }}>

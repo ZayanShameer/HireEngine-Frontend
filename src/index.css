@@ -931,10 +931,14 @@ textarea::placeholder {
   padding: 36px !important;
   display: flex;
   flex-direction: column;
+  position: sticky;
+  top: 0;
+  max-height: calc(100vh - var(--header-height));
   overflow-y: auto;
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   box-shadow: var(--shadow-sm);
+  align-self: flex-start;
 }
 
 .faceted-section-title {
